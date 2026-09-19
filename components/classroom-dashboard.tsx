@@ -545,8 +545,8 @@ function StudentsView({ students, search, setSearch, onAdd, onRemove }: {
           onSubmit={e => { e.preventDefault(); if (!firstName || !lastName) return; onAdd(firstName, lastName); setFirstName(''); setLastName(''); setShowForm(false) }}
           className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4"
         >
-          <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Ism</label><input value={firstName} onChange={e => setFirstName(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400" /></div>
-          <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Familiya</label><input value={lastName} onChange={e => setLastName(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400" /></div>
+          <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Ism</label><input value={firstName} onChange={e => setFirstName(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} /></div>
+          <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Familiya</label><input value={lastName} onChange={e => setLastName(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} /></div>
           <Button type="submit" className="h-10 rounded-xl bg-[#1958d1] hover:bg-blue-700">Qo‘shish</Button>
         </form>
       )}
@@ -592,14 +592,14 @@ function DutiesView({ students, duties, today, onAdd, onRemove }: {
       >
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-slate-500">O‘quvchi</label>
-          <select value={studentId} onChange={e => setStudentId(e.target.value as any)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400">
+          <select value={studentId} onChange={e => setStudentId(e.target.value as any)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }}>
             <option value="">Tanlang</option>
             {students.map(s => <option key={s.id} value={s.id}>{fullName(s)}</option>)}
           </select>
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-slate-500">Sana</label>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400" />
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} />
         </div>
         <Button type="submit" className="h-10 rounded-xl bg-[#1958d1] hover:bg-blue-700"><Plus className="mr-2 size-4" />Qo‘shish</Button>
       </form>
@@ -643,10 +643,10 @@ function MonitorView({ klasskomList, onCreate, onResetPassword }: {
             action={async formData => { setError(''); const r = await onCreate(formData); if (r?.error) setError(r.error) }}
             className="mt-5 grid gap-4 sm:grid-cols-2"
           >
-            <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Ism</label><input name="firstName" required className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400" /></div>
-            <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Familiya</label><input name="lastName" required className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400" /></div>
-            <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Login</label><input name="username" required placeholder="masalan: jahongir01" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400" /></div>
-            <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Parol</label><input name="password" type="password" required minLength={6} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400" /></div>
+            <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Ism</label><input name="firstName" required className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} /></div>
+            <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Familiya</label><input name="lastName" required className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} /></div>
+            <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Login</label><input name="username" required placeholder="masalan: jahongir01" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} /></div>
+            <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Parol</label><input name="password" type="password" required minLength={6} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} /></div>
             {error && <p className="sm:col-span-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{error}</p>}
             <Button type="submit" className="sm:col-span-2 h-11 rounded-xl bg-[#1958d1] hover:bg-blue-700">Akkaunt yaratish</Button>
           </form>
@@ -668,7 +668,7 @@ function MonitorView({ klasskomList, onCreate, onResetPassword }: {
                   action={async formData => { formData.set('klasskomId', k.id); const r = await onResetPassword(formData); if (!r?.error) setResettingId(null) }}
                   className="flex flex-wrap items-end gap-3"
                 >
-                  <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Yangi parol</label><input name="password" type="password" required minLength={6} className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400" /></div>
+                  <div><label className="mb-1.5 block text-xs font-semibold text-slate-500">Yangi parol</label><input name="password" type="password" required minLength={6} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} /></div>
                   <Button type="submit" className="h-10 rounded-xl bg-[#1958d1] hover:bg-blue-700">Saqlash</Button>
                   <button type="button" onClick={() => setResettingId(null)} className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-500">Bekor qilish</button>
                 </form>

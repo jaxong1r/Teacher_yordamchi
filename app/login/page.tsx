@@ -34,7 +34,8 @@ export default function LoginPage() {
               name="username"
               required
               autoComplete="username"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none focus:border-blue-400"
+              style={{ colorScheme: 'light' }}
               placeholder="login"
             />
           </div>
@@ -45,7 +46,8 @@ export default function LoginPage() {
               type="password"
               required
               autoComplete="current-password"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none focus:border-blue-400"
+              style={{ colorScheme: 'light' }}
               placeholder="••••••••"
             />
           </div>
