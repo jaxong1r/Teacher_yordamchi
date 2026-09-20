@@ -76,10 +76,21 @@ function oneOrNull<T>(value: T | T[] | null): T | null {
   return value
 }
 function formatMoney(value: number) {
-  return new Intl.NumberFormat('uz-UZ').format(value) + ' so‘m'
+  const grouped = Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+  return `${grouped} so‘m`
 }
-function todayLabel() {
-  return new Date().toLocaleDateString('uz-UZ', { day: 'numeric', month: 'long', year: 'numeric' })
+const UZ_MONTHS = [
+  'yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun',
+  'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr',
+]
+
+function formatUzDate(dateStr: string, style: 'long' | 'short' = 'short') {
+  const d = new Date(`${dateStr}T00:00:00`)
+  const day = d.getDate()
+  const month = d.getMonth()
+  const year = d.getFullYear()
+  if (style === 'long') return `${day} ${UZ_MONTHS[month]} ${year}`
+  return `${String(day).padStart(2, '0')}.${String(month + 1).padStart(2, '0')}.${year}`
 }
 function currentPeriod() {
   const d = new Date()
@@ -238,7 +249,7 @@ export default function ClassroomDashboard({
               <Menu className="size-5" />
             </button>
             <div>
-              <p className="text-sm text-slate-400">{todayLabel()}</p>
+              <p className="text-sm text-slate-400">{formatUzDate(today, 'long')}</p>
               <h1 className="text-lg font-bold tracking-tight">
                 {activeTab === 'home' ? `Xush kelibsiz, ${profile.first_name}!` : navItems.find(i => i.id === activeTab)?.label}
               </h1>
@@ -275,6 +286,7 @@ export default function ClassroomDashboard({
               attendance={attendanceToday}
               update={handleAttendance}
               markAll={handleMarkAll}
+              today={today}
             />
           )}
           {activeTab === 'students' && (
@@ -412,7 +424,7 @@ function HomeView({ role, students, presentCount, absentCount, excusedCount, dut
         <StatCard label="Bugungi kelganlar" value={`${presentCount} / ${students.length}`} helper="Davomat holati" icon={CheckCircle2} tone="green" />
         <StatCard label="Bugungi kelmaganlar" value={`${absentCount}`} helper="E'tibor talab qiladi" icon={XCircle} tone="red" />
         <StatCard label="O‘quvchilar" value={`${students.length}`} helper="Sinf ro‘yxati" icon={Users} />
-        <StatCard label="Bugungi navbatchilar" value={`${todaysDuties.length}`} helper={new Date(today).toLocaleDateString('uz-UZ')} icon={CalendarDays} tone="amber" />
+        <StatCard label="Bugungi navbatchilar" value={`${todaysDuties.length}`} helper={formatUzDate(today)} icon={CalendarDays} tone="amber" />
         {role === 'klasskom' && (
           <StatCard label="Pul yig‘imi" value={`${paymentStats.paid} / ${students.length}`} helper={`${formatMoney(paymentStats.total)} yig‘ildi`} icon={WalletCards} tone="amber" />
         )}
@@ -422,7 +434,7 @@ function HomeView({ role, students, presentCount, absentCount, excusedCount, dut
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-bold">Bugungi yo‘qlama</h3>
-              <p className="mt-1 text-xs text-slate-400">{new Date(today).toLocaleDateString('uz-UZ')}</p>
+              <p className="mt-1 text-xs text-slate-400">{formatUzDate(today)}</p>
             </div>
             <button onClick={() => go('attendance')} className="text-xs font-semibold text-[#1958d1]">Batafsil <ArrowRight className="ml-1 inline size-3" /></button>
           </div>
@@ -479,15 +491,16 @@ function StatusButton({ active, onClick, tone, label }: { active: boolean; onCli
   return <button onClick={onClick} className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition ${style[tone]}`}>{label}</button>
 }
 
-function AttendanceView({ students, attendance, update, markAll }: {
+function AttendanceView({ students, attendance, update, markAll, today }: {
   students: StudentRow[]
   attendance: Record<number, AttendanceStatus>
   update: (id: number, status: AttendanceStatus) => void
   markAll: (status: AttendanceStatus) => void
+  today: string
 }) {
   return (
     <>
-      <SectionHeader eyebrow="Davomat nazorati" title="Yo‘qlama" description={`Bugun, ${todayLabel()}`} />
+      <SectionHeader eyebrow="Davomat nazorati" title="Yo‘qlama" description={`Bugun, ${formatUzDate(today, 'long')}`} />
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
         <div>
           <p className="text-sm font-semibold text-blue-900">Tezkor belgilash</p>
@@ -611,7 +624,7 @@ function DutiesView({ students, duties, today, onAdd, onRemove }: {
           const s = oneOrNull(duty.students)
           return (
             <div key={duty.id} className="grid grid-cols-[150px_1fr_60px] items-center border-b border-slate-100 px-5 py-4 last:border-0">
-              <span className="text-sm font-semibold">{new Date(duty.date).toLocaleDateString('uz-UZ')}</span>
+              <span className="text-sm font-semibold">{formatUzDate(duty.date)}</span>
               <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 w-fit">{s ? fullName(s) : '—'}</span>
               <button onClick={() => onRemove(duty.id)} className="justify-self-end rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="size-4" /></button>
             </div>
