@@ -73,8 +73,21 @@ export async function resetKlasskomPassword(formData: FormData) {
   const password = String(formData.get('password') || '')
   if (password.length < 6) return { error: 'Parol kamida 6 belgidan iborat bo‘lsin' }
 
-  await requireTeacher()
+  const { profile } = await requireTeacher()
   const admin = createAdminClient()
+
+  // Security check: the target account must actually be a klasskom in THIS
+  // teacher's own class. Without this, any teacher could reset the password
+  // of any user in the whole system just by knowing their UID.
+  const { data: target } = await admin
+    .from('profiles')
+    .select('id, role, class_id')
+    .eq('id', klasskomId)
+    .single()
+
+  if (!target || target.role !== 'klasskom' || target.class_id !== profile.class_id) {
+    return { error: 'Bu hisobni o‘zgartirishga ruxsat yo‘q' }
+  }
 
   const { error } = await admin.auth.admin.updateUserById(klasskomId, { password })
   if (error) return { error: 'Parol yangilanmadi' }

@@ -58,8 +58,12 @@ export default async function Page() {
       : Promise.resolve({ data: [] as any[] }),
   ])
 
-  const today = new Date().toISOString().slice(0, 10)
-  const monthAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  // Uzbekistan is UTC+5 year-round (no DST). Using raw UTC here would show
+  // "yesterday" for a few hours every night around midnight in Tashkent.
+  const TASHKENT_OFFSET_MS = 5 * 60 * 60 * 1000
+  const tashkentNow = new Date(Date.now() + TASHKENT_OFFSET_MS)
+  const today = tashkentNow.toISOString().slice(0, 10)
+  const monthAgo = new Date(tashkentNow.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
   const { data: attendance } = await supabase
     .from('attendance')

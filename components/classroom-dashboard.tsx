@@ -578,7 +578,7 @@ function StudentsView({ students, search, setSearch, onAdd, onRemove }: {
               <div className={`flex size-9 items-center justify-center rounded-full text-xs font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
               <p className="text-sm font-semibold">{fullName(student)}</p>
             </div>
-            <div className="flex justify-end"><button onClick={() => onRemove(student.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="size-4" /></button></div>
+            <div className="flex justify-end"><button onClick={() => { if (confirm(`${fullName(student)} ni o‘chirishni tasdiqlaysizmi?`)) onRemove(student.id) }} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="size-4" /></button></div>
           </div>
         ))}
       </div>
@@ -626,7 +626,7 @@ function DutiesView({ students, duties, today, onAdd, onRemove }: {
             <div key={duty.id} className="grid grid-cols-[150px_1fr_60px] items-center border-b border-slate-100 px-5 py-4 last:border-0">
               <span className="text-sm font-semibold">{formatUzDate(duty.date)}</span>
               <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 w-fit">{s ? fullName(s) : '—'}</span>
-              <button onClick={() => onRemove(duty.id)} className="justify-self-end rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="size-4" /></button>
+              <button onClick={() => { if (confirm('Bu navbatchilikni o‘chirishni tasdiqlaysizmi?')) onRemove(duty.id) }} className="justify-self-end rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="size-4" /></button>
             </div>
           )
         })}
@@ -711,34 +711,64 @@ function PaymentsView({ students, payments, period, stats, search, setSearch, on
         <input value={search} onChange={(e: any) => setSearch(e.target.value)} placeholder="O‘quvchini qidirish..." className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" />
       </div>
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid grid-cols-[1fr_120px_120px_120px_150px_90px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          <span>O‘quvchi</span><span>Kerakli</span><span>To‘langan</span><span>Qolgan</span><span>Holat</span><span />
+        <div className="grid grid-cols-[1fr_130px_120px_120px_120px_150px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <span>O‘quvchi</span><span>Kerakli</span><span>To‘langan</span><span>Qolgan</span><span>Holat</span><span className="text-right">Amal</span>
         </div>
         {students.map((student: StudentRow) => {
           const payment = payments.find((p: PaymentRow) => p.student_id === student.id && p.period === period) || { expected_amount: 20000, paid_amount: 0 }
-          const remaining = Math.max(0, payment.expected_amount - payment.paid_amount)
-          const status = remaining === 0 ? 'To‘langan' : payment.paid_amount ? 'Qisman' : 'To‘lanmagan'
-          return (
-            <div key={student.id} className="grid grid-cols-[1fr_120px_120px_120px_150px_90px] items-center border-b border-slate-100 px-5 py-4 last:border-0">
-              <div className="flex items-center gap-3">
-                <div className={`flex size-8 items-center justify-center rounded-full text-[10px] font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
-                <span className="text-sm font-semibold">{fullName(student)}</span>
-              </div>
-              <span className="text-xs text-slate-500">{formatMoney(payment.expected_amount)}</span>
-              <span className="text-xs font-semibold">{formatMoney(payment.paid_amount)}</span>
-              <span className="text-xs text-slate-500">{formatMoney(remaining)}</span>
-              <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-semibold ${status === 'To‘langan' ? 'bg-emerald-50 text-emerald-700' : status === 'Qisman' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'}`}>{status}</span>
-              <button
-                onClick={() => onChange(student.id, payment.expected_amount, Math.min(payment.expected_amount, payment.paid_amount + 5000))}
-                className="justify-self-end rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-semibold text-[#1958d1] hover:bg-blue-50"
-              >
-                +5 000
-              </button>
-            </div>
-          )
+          return <PaymentRow key={student.id} student={student} payment={payment} onChange={onChange} />
         })}
+        {students.length === 0 && <p className="px-5 py-8 text-center text-sm text-slate-400">Hali o‘quvchi qo‘shilmagan</p>}
       </div>
     </>
+  )
+}
+
+function PaymentRow({ student, payment, onChange }: {
+  student: StudentRow
+  payment: { expected_amount: number; paid_amount: number }
+  onChange: (studentId: number, expected: number, paid: number) => void
+}) {
+  const [expected, setExpected] = useState(payment.expected_amount)
+  const [addAmount, setAddAmount] = useState(5000)
+  const remaining = Math.max(0, expected - payment.paid_amount)
+  const status = remaining === 0 && expected > 0 ? 'To‘langan' : payment.paid_amount ? 'Qisman' : 'To‘lanmagan'
+
+  return (
+    <div className="grid grid-cols-[1fr_130px_120px_120px_120px_150px] items-center border-b border-slate-100 px-5 py-4 last:border-0">
+      <div className="flex items-center gap-3">
+        <div className={`flex size-8 items-center justify-center rounded-full text-[10px] font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
+        <span className="text-sm font-semibold">{fullName(student)}</span>
+      </div>
+      <input
+        type="number"
+        min={0}
+        value={expected}
+        onChange={e => setExpected(Number(e.target.value))}
+        onBlur={() => { if (expected !== payment.expected_amount) onChange(student.id, expected, payment.paid_amount) }}
+        className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-950 outline-none focus:border-blue-400"
+        style={{ colorScheme: 'light' }}
+      />
+      <span className="text-xs font-semibold">{formatMoney(payment.paid_amount)}</span>
+      <span className="text-xs text-slate-500">{formatMoney(remaining)}</span>
+      <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-semibold ${status === 'To‘langan' ? 'bg-emerald-50 text-emerald-700' : status === 'Qisman' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'}`}>{status}</span>
+      <div className="flex justify-end gap-1.5">
+        <input
+          type="number"
+          min={0}
+          value={addAmount}
+          onChange={e => setAddAmount(Number(e.target.value))}
+          className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-950 outline-none focus:border-blue-400"
+          style={{ colorScheme: 'light' }}
+        />
+        <button
+          onClick={() => onChange(student.id, expected, Math.min(expected, payment.paid_amount + addAmount))}
+          className="shrink-0 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-semibold text-[#1958d1] hover:bg-blue-50"
+        >
+          Qo‘shish
+        </button>
+      </div>
+    </div>
   )
 }
 
