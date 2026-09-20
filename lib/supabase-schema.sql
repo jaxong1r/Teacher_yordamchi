@@ -46,26 +46,43 @@ create table public.duty_schedules (
   created_at timestamptz not null default now()
 );
 
+create table public.collections (
+  id bigint generated always as identity primary key,
+  class_id uuid not null references public.class_settings(id) on delete cascade,
+  title text not null,
+  expected_amount integer not null default 0 check (expected_amount >= 0),
+  created_by uuid not null references public.profiles(id),
+  created_at timestamptz not null default now()
+);
+
 create table public.payments (
   id bigint generated always as identity primary key,
+  collection_id bigint not null references public.collections(id) on delete cascade,
   student_id bigint not null references public.students(id) on delete cascade,
-  period date not null,
-  expected_amount integer not null default 0 check (expected_amount >= 0),
   paid_amount integer not null default 0 check (paid_amount >= 0),
   updated_at timestamptz not null default now(),
-  unique(student_id, period)
+  unique(collection_id, student_id)
 );
 
 -- ---------- Helper functions (security definer: safe to query profiles inside RLS) ----------
 
+-- NOTE: these must stay LANGUAGE plpgsql, not LANGUAGE sql. Simple SQL-language
+-- functions can be inlined by the planner into the calling RLS policy, which
+-- silently defeats the SECURITY DEFINER privilege escalation and breaks the
+-- policy (observed in production: caused profile lookups and student inserts
+-- to fail unpredictably). plpgsql functions are never inlined.
 create or replace function public.my_role() returns public.app_role
-language sql stable security definer set search_path = public as $$
-  select role from public.profiles where id = auth.uid();
+language plpgsql stable security definer set search_path = public as $$
+begin
+  return (select role from public.profiles where id = auth.uid());
+end;
 $$;
 
 create or replace function public.my_class_id() returns uuid
-language sql stable security definer set search_path = public as $$
-  select class_id from public.profiles where id = auth.uid();
+language plpgsql stable security definer set search_path = public as $$
+begin
+  return (select class_id from public.profiles where id = auth.uid());
+end;
 $$;
 
 -- ---------- Row Level Security ----------
@@ -81,7 +98,10 @@ alter table public.payments enable row level security;
 create policy "read own class" on public.class_settings for select
   using (id = public.my_class_id());
 
--- profiles: a user can see every profile in their own class (teacher needs to see klasskom, and vice versa)
+-- profiles: a user can always read their own row, and every profile in their class
+-- (teacher needs to see klasskom, and vice versa)
+create policy "users can read own profile" on public.profiles for select
+  using (id = auth.uid());
 create policy "read profiles in my class" on public.profiles for select
   using (class_id = public.my_class_id());
 -- No insert/update/delete policy for normal users: accounts are only created/edited
@@ -108,21 +128,29 @@ create policy "manage duties in my class" on public.duty_schedules for all
   using (exists (select 1 from public.students s where s.id = student_id and s.class_id = public.my_class_id()))
   with check (exists (select 1 from public.students s where s.id = student_id and s.class_id = public.my_class_id()));
 
--- payments: KLASSKOM ONLY. A teacher's queries against this table return zero rows
--- and are rejected at the database level, regardless of what the app code does.
+-- collections + payments: KLASSKOM ONLY. A teacher's queries against these tables
+-- return zero rows and are rejected at the database level, regardless of what
+-- the app code does.
+alter table public.collections enable row level security;
+create policy "klasskom reads collections in their class" on public.collections for select
+  using (public.my_role() = 'klasskom' and class_id = public.my_class_id());
+create policy "klasskom manages collections in their class" on public.collections for all
+  using (public.my_role() = 'klasskom' and class_id = public.my_class_id())
+  with check (public.my_role() = 'klasskom' and class_id = public.my_class_id());
+
 create policy "klasskom reads payments in their class" on public.payments for select
   using (
     public.my_role() = 'klasskom'
-    and exists (select 1 from public.students s where s.id = student_id and s.class_id = public.my_class_id())
+    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id = public.my_class_id())
   );
 create policy "klasskom manages payments in their class" on public.payments for all
   using (
     public.my_role() = 'klasskom'
-    and exists (select 1 from public.students s where s.id = student_id and s.class_id = public.my_class_id())
+    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id = public.my_class_id())
   )
   with check (
     public.my_role() = 'klasskom'
-    and exists (select 1 from public.students s where s.id = student_id and s.class_id = public.my_class_id())
+    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id = public.my_class_id())
   );
 
 -- ---------- Optional: keep only the last ~31 days of attendance ----------

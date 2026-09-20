@@ -76,11 +76,18 @@ export default async function Page() {
     .gte('date', monthAgo)
     .order('date')
 
-  // Payments query only succeeds for klasskom — RLS blocks teachers at the DB level.
-  const { data: payments } =
-    profile.role === 'klasskom'
-      ? await supabase.from('payments').select('student_id, period, expected_amount, paid_amount')
-      : { data: [] }
+  // Collections (money drives) + payments: only klasskom can see these — RLS
+  // blocks teachers at the database level.
+  let collections: any[] = []
+  let payments: any[] = []
+  if (profile.role === 'klasskom') {
+    const [{ data: collectionsData }, { data: paymentsData }] = await Promise.all([
+      supabase.from('collections').select('id, title, expected_amount, created_at').order('created_at', { ascending: false }),
+      supabase.from('payments').select('collection_id, student_id, paid_amount'),
+    ])
+    collections = collectionsData ?? []
+    payments = paymentsData ?? []
+  }
 
   return (
     <ClassroomDashboard
@@ -89,7 +96,8 @@ export default async function Page() {
       klasskomList={klasskomList ?? []}
       attendance={attendance ?? []}
       duties={(duties ?? []) as any}
-      payments={payments ?? []}
+      collections={collections}
+      payments={payments}
       today={today}
     />
   )

@@ -30,7 +30,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { logout } from '@/app/actions/auth'
 import { createKlasskomAccount, resetKlasskomPassword } from '@/app/actions/klasskom'
-import { addStudent, removeStudent, setAttendance, addDuty, removeDuty, upsertPayment } from '@/app/actions/data'
+import { addStudent, removeStudent, setAttendance, addDuty, removeDuty, createCollection, deleteCollection, setPaymentAmount } from '@/app/actions/data'
 
 type Role = 'teacher' | 'klasskom'
 type Tab = 'home' | 'attendance' | 'students' | 'duties' | 'monitor' | 'payments' | 'settings'
@@ -40,7 +40,8 @@ type StudentRow = { id: number; first_name: string; last_name: string }
 type KlasskomRow = { id: string; first_name: string; last_name: string; username: string }
 type AttendanceRow = { student_id: number; date: string; status: AttendanceStatus }
 type DutyRow = { id: number; date: string; student_id: number; students: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] }
-type PaymentRow = { student_id: number; period: string; expected_amount: number; paid_amount: number }
+type CollectionRow = { id: number; title: string; expected_amount: number; created_at: string }
+type PaymentRow = { collection_id: number; student_id: number; paid_amount: number }
 type Profile = {
   id: string
   first_name: string
@@ -92,11 +93,6 @@ function formatUzDate(dateStr: string, style: 'long' | 'short' = 'short') {
   if (style === 'long') return `${day} ${UZ_MONTHS[month]} ${year}`
   return `${String(day).padStart(2, '0')}.${String(month + 1).padStart(2, '0')}.${year}`
 }
-function currentPeriod() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
-}
-
 const navItems: { id: Tab; label: string; icon: typeof LayoutDashboard; roles: Role[] }[] = [
   { id: 'home', label: 'Bosh sahifa', icon: LayoutDashboard, roles: ['teacher', 'klasskom'] },
   { id: 'attendance', label: 'Yo‘qlama', icon: ClipboardCheck, roles: ['teacher', 'klasskom'] },
@@ -113,6 +109,7 @@ export default function ClassroomDashboard({
   klasskomList,
   attendance,
   duties,
+  collections,
   payments,
   today,
 }: {
@@ -121,6 +118,7 @@ export default function ClassroomDashboard({
   klasskomList: KlasskomRow[]
   attendance: AttendanceRow[]
   duties: DutyRow[]
+  collections: CollectionRow[]
   payments: PaymentRow[]
   today: string
 }) {
@@ -147,16 +145,10 @@ export default function ClassroomDashboard({
   const absentCount = Object.values(attendanceToday).filter(s => s === 'absent').length
   const excusedCount = Object.values(attendanceToday).filter(s => s === 'excused').length
 
-  const period = currentPeriod()
   const paymentStats = useMemo(() => {
-    const rows = students.map(s => payments.find(p => p.student_id === s.id && p.period === period))
-    return {
-      paid: rows.filter(r => r && r.paid_amount >= r.expected_amount && r.expected_amount > 0).length,
-      partial: rows.filter(r => r && r.paid_amount > 0 && r.paid_amount < r.expected_amount).length,
-      unpaid: rows.filter(r => !r || r.paid_amount === 0).length,
-      total: rows.reduce((sum, r) => sum + (r?.paid_amount ?? 0), 0),
-    }
-  }, [students, payments, period])
+    const total = payments.reduce((sum, p) => sum + p.paid_amount, 0)
+    return { activeCollections: collections.length, total }
+  }, [collections, payments])
 
   function showToast(message: string) {
     setToast(message)
@@ -342,13 +334,22 @@ export default function ClassroomDashboard({
           {activeTab === 'payments' && role === 'klasskom' && (
             <PaymentsView
               students={students}
+              collections={collections}
               payments={payments}
-              period={period}
               stats={paymentStats}
-              search={search}
-              setSearch={setSearch}
-              onChange={async (studentId: number, expected: number, paid: number) => {
-                await upsertPayment(studentId, period, expected, paid)
+              onCreate={async (title: string, expected: number, studentIds: number[]) => {
+                const r = await createCollection(profile.class_id, title, expected, studentIds)
+                showToast(r?.error ? r.error : 'Yig‘im ochildi')
+                refresh()
+                return r
+              }}
+              onDelete={async (collectionId: number) => {
+                await deleteCollection(collectionId)
+                showToast('Yig‘im o‘chirildi')
+                refresh()
+              }}
+              onChange={async (collectionId: number, studentId: number, paid: number) => {
+                await setPaymentAmount(collectionId, studentId, paid)
                 refresh()
               }}
             />
@@ -406,7 +407,7 @@ function HomeView({ role, students, presentCount, absentCount, excusedCount, dut
   excusedCount: number
   duties: DutyRow[]
   today: string
-  paymentStats: { paid: number; partial: number; unpaid: number; total: number }
+  paymentStats: { activeCollections: number; total: number }
   go: (tab: Tab) => void
 }) {
   const todaysDuties = duties.filter(d => d.date === today)
@@ -426,7 +427,7 @@ function HomeView({ role, students, presentCount, absentCount, excusedCount, dut
         <StatCard label="O‘quvchilar" value={`${students.length}`} helper="Sinf ro‘yxati" icon={Users} />
         <StatCard label="Bugungi navbatchilar" value={`${todaysDuties.length}`} helper={formatUzDate(today)} icon={CalendarDays} tone="amber" />
         {role === 'klasskom' && (
-          <StatCard label="Pul yig‘imi" value={`${paymentStats.paid} / ${students.length}`} helper={`${formatMoney(paymentStats.total)} yig‘ildi`} icon={WalletCards} tone="amber" />
+          <StatCard label="Pul yig‘imi" value={`${paymentStats.activeCollections} ta yig‘im`} helper={`${formatMoney(paymentStats.total)} yig‘ildi`} icon={WalletCards} tone="amber" />
         )}
       </div>
       <div className="mt-6 grid gap-5 xl:grid-cols-[1.4fr_1fr]">
@@ -696,76 +697,222 @@ function MonitorView({ klasskomList, onCreate, onResetPassword }: {
   )
 }
 
-function PaymentsView({ students, payments, period, stats, search, setSearch, onChange }: any) {
+function PaymentsView({ students, collections, payments, stats, onCreate, onDelete, onChange }: {
+  students: StudentRow[]
+  collections: CollectionRow[]
+  payments: PaymentRow[]
+  stats: { activeCollections: number; total: number }
+  onCreate: (title: string, expected: number, studentIds: number[]) => Promise<{ error?: string; success?: boolean } | undefined>
+  onDelete: (collectionId: number) => void
+  onChange: (collectionId: number, studentId: number, paid: number) => void
+}) {
+  const [showForm, setShowForm] = useState(false)
+  const [openCollectionId, setOpenCollectionId] = useState<number | null>(null)
+
   return (
     <>
-      <SectionHeader eyebrow="Shaxsiy modul • faqat Klasskom" title="Pul yig‘imi" description="Joriy oy • To‘lovlar va yig‘imlar nazorati" />
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="To‘laganlar" value={`${stats.paid}`} helper={`${stats.paid} / ${students.length} o‘quvchi`} icon={CheckCircle2} tone="green" />
-        <StatCard label="Qisman to‘laganlar" value={`${stats.partial}`} helper="To‘lovni davom ettirmoqda" icon={BarChart3} tone="amber" />
-        <StatCard label="To‘lamaganlar" value={`${stats.unpaid}`} helper="Eslatma yuborish kerak" icon={XCircle} tone="red" />
-        <StatCard label="Jami yig‘ilgan" value={formatMoney(stats.total)} helper="Joriy oy" icon={CircleDollarSign} />
+      <SectionHeader
+        eyebrow="Shaxsiy modul • faqat Klasskom"
+        title="Pul yig‘imi"
+        description="Har bir yig‘im uchun sabab, summa va kimlardan yig‘ilayotganini belgilang"
+        action={<Button onClick={() => setShowForm(v => !v)} className="h-10 rounded-xl bg-[#1958d1] hover:bg-blue-700"><Plus className="mr-2 size-4" />Yangi yig‘im</Button>}
+      />
+      <div className="mb-6 grid gap-4 sm:grid-cols-2">
+        <StatCard label="Faol yig‘imlar" value={`${stats.activeCollections}`} helper="Ochiq turgan yig‘imlar soni" icon={WalletCards} tone="amber" />
+        <StatCard label="Jami yig‘ilgan" value={formatMoney(stats.total)} helper="Barcha yig‘imlar bo‘yicha" icon={CircleDollarSign} />
       </div>
-      <div className="mb-5 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 sm:w-[360px]">
-        <Search className="size-4 text-slate-400" />
-        <input value={search} onChange={(e: any) => setSearch(e.target.value)} placeholder="O‘quvchini qidirish..." className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" />
-      </div>
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid grid-cols-[1fr_130px_120px_120px_120px_150px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          <span>O‘quvchi</span><span>Kerakli</span><span>To‘langan</span><span>Qolgan</span><span>Holat</span><span className="text-right">Amal</span>
+
+      {showForm && (
+        <NewCollectionForm
+          students={students}
+          onCreate={async (title, expected, studentIds) => {
+            const r = await onCreate(title, expected, studentIds)
+            if (!r?.error) setShowForm(false)
+            return r
+          }}
+        />
+      )}
+
+      {collections.length === 0 && !showForm && (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center">
+          <p className="text-sm text-slate-400">Hali birorta yig‘im ochilmagan. "Yangi yig‘im" tugmasini bosing.</p>
         </div>
-        {students.map((student: StudentRow) => {
-          const payment = payments.find((p: PaymentRow) => p.student_id === student.id && p.period === period) || { expected_amount: 20000, paid_amount: 0 }
-          return <PaymentRow key={student.id} student={student} payment={payment} onChange={onChange} />
+      )}
+
+      <div className="space-y-4">
+        {collections.map(collection => {
+          const collectionPayments = payments.filter(p => p.collection_id === collection.id)
+          const collected = collectionPayments.reduce((sum, p) => sum + p.paid_amount, 0)
+          const expectedTotal = collection.expected_amount * collectionPayments.length
+          const paidCount = collectionPayments.filter(p => p.paid_amount >= collection.expected_amount && collection.expected_amount > 0).length
+          const isOpen = openCollectionId === collection.id
+
+          return (
+            <div key={collection.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <button
+                onClick={() => setOpenCollectionId(isOpen ? null : collection.id)}
+                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left"
+              >
+                <div>
+                  <p className="text-sm font-bold">{collection.title}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {formatMoney(collection.expected_amount)} / o‘quvchi • {collectionPayments.length} nafar • {formatUzDate(collection.created_at.slice(0, 10))}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-4">
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-emerald-700">{formatMoney(collected)}</p>
+                    <p className="text-[11px] text-slate-400">{paidCount} / {collectionPayments.length} to‘lagan</p>
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); if (confirm(`"${collection.title}" yig‘imini o‘chirishni tasdiqlaysizmi?`)) onDelete(collection.id) }}
+                    className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              </button>
+
+              {isOpen && (
+                <div className="border-t border-slate-100">
+                  <div className="grid grid-cols-[1fr_140px_140px_140px] border-b border-slate-100 bg-slate-50/70 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    <span>O‘quvchi</span><span>To‘langan</span><span>Qolgan</span><span>Holat</span>
+                  </div>
+                  {collectionPayments.map(payment => {
+                    const student = students.find(s => s.id === payment.student_id)
+                    if (!student) return null
+                    return (
+                      <PaymentStudentRow
+                        key={payment.student_id}
+                        student={student}
+                        payment={payment}
+                        expectedAmount={collection.expected_amount}
+                        onChange={paid => onChange(collection.id, payment.student_id, paid)}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
         })}
-        {students.length === 0 && <p className="px-5 py-8 text-center text-sm text-slate-400">Hali o‘quvchi qo‘shilmagan</p>}
       </div>
     </>
   )
 }
 
-function PaymentRow({ student, payment, onChange }: {
-  student: StudentRow
-  payment: { expected_amount: number; paid_amount: number }
-  onChange: (studentId: number, expected: number, paid: number) => void
+function NewCollectionForm({ students, onCreate }: {
+  students: StudentRow[]
+  onCreate: (title: string, expected: number, studentIds: number[]) => Promise<{ error?: string; success?: boolean } | undefined>
 }) {
-  const [expected, setExpected] = useState(payment.expected_amount)
-  const [addAmount, setAddAmount] = useState(5000)
-  const remaining = Math.max(0, expected - payment.paid_amount)
-  const status = remaining === 0 && expected > 0 ? 'To‘langan' : payment.paid_amount ? 'Qisman' : 'To‘lanmagan'
+  const [title, setTitle] = useState('')
+  const [expected, setExpected] = useState(20000)
+  const [selected, setSelected] = useState<Set<number>>(new Set(students.map(s => s.id)))
+  const [error, setError] = useState('')
+
+  function toggle(id: number) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   return (
-    <div className="grid grid-cols-[1fr_130px_120px_120px_120px_150px] items-center border-b border-slate-100 px-5 py-4 last:border-0">
+    <form
+      onSubmit={async e => {
+        e.preventDefault()
+        setError('')
+        const r = await onCreate(title, expected, Array.from(selected))
+        if (r?.error) setError(r.error)
+      }}
+      className="mb-6 rounded-2xl border border-slate-200 bg-white p-5"
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-slate-500">Nima uchun (sabab)</label>
+          <input
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            required
+            placeholder="masalan: Yangi yil sovg‘asi uchun"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none focus:border-blue-400"
+            style={{ colorScheme: 'light' }}
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-slate-500">Har bir o‘quvchidan qancha</label>
+          <input
+            type="number"
+            min={0}
+            value={expected}
+            onChange={e => setExpected(Number(e.target.value))}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none focus:border-blue-400"
+            style={{ colorScheme: 'light' }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-xs font-semibold text-slate-500">Kimlardan yig‘iladi</label>
+          <div className="flex gap-2 text-[11px] font-semibold text-[#1958d1]">
+            <button type="button" onClick={() => setSelected(new Set(students.map(s => s.id)))}>Hammasi</button>
+            <button type="button" onClick={() => setSelected(new Set())}>Hech kim</button>
+          </div>
+        </div>
+        <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-xl border border-slate-200 p-3 sm:grid-cols-2">
+          {students.map(s => (
+            <label key={s.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+              <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} className="size-4 accent-[#1958d1]" />
+              {fullName(s)}
+            </label>
+          ))}
+          {students.length === 0 && <p className="text-sm text-slate-400">Hali o‘quvchi qo‘shilmagan</p>}
+        </div>
+      </div>
+
+      {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{error}</p>}
+
+      <Button type="submit" className="mt-4 h-10 rounded-xl bg-[#1958d1] hover:bg-blue-700">Yig‘imni ochish</Button>
+    </form>
+  )
+}
+
+function PaymentStudentRow({ student, payment, expectedAmount, onChange }: {
+  student: StudentRow
+  payment: PaymentRow
+  expectedAmount: number
+  onChange: (paid: number) => void
+}) {
+  const [addAmount, setAddAmount] = useState(5000)
+  const remaining = Math.max(0, expectedAmount - payment.paid_amount)
+  const status = remaining === 0 && expectedAmount > 0 ? 'To‘langan' : payment.paid_amount ? 'Qisman' : 'To‘lanmagan'
+
+  return (
+    <div className="grid grid-cols-[1fr_140px_140px_140px] items-center gap-2 border-b border-slate-100 px-5 py-3 last:border-0">
       <div className="flex items-center gap-3">
-        <div className={`flex size-8 items-center justify-center rounded-full text-[10px] font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
+        <div className={`flex size-7 items-center justify-center rounded-full text-[10px] font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
         <span className="text-sm font-semibold">{fullName(student)}</span>
       </div>
-      <input
-        type="number"
-        min={0}
-        value={expected}
-        onChange={e => setExpected(Number(e.target.value))}
-        onBlur={() => { if (expected !== payment.expected_amount) onChange(student.id, expected, payment.paid_amount) }}
-        className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-950 outline-none focus:border-blue-400"
-        style={{ colorScheme: 'light' }}
-      />
       <span className="text-xs font-semibold">{formatMoney(payment.paid_amount)}</span>
       <span className="text-xs text-slate-500">{formatMoney(remaining)}</span>
-      <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-semibold ${status === 'To‘langan' ? 'bg-emerald-50 text-emerald-700' : status === 'Qisman' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'}`}>{status}</span>
-      <div className="flex justify-end gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${status === 'To‘langan' ? 'bg-emerald-50 text-emerald-700' : status === 'Qisman' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'}`}>{status}</span>
         <input
           type="number"
           min={0}
           value={addAmount}
           onChange={e => setAddAmount(Number(e.target.value))}
-          className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-950 outline-none focus:border-blue-400"
+          className="w-16 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-950 outline-none focus:border-blue-400"
           style={{ colorScheme: 'light' }}
         />
         <button
-          onClick={() => onChange(student.id, expected, Math.min(expected, payment.paid_amount + addAmount))}
-          className="shrink-0 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-semibold text-[#1958d1] hover:bg-blue-50"
+          onClick={() => onChange(Math.min(expectedAmount, payment.paid_amount + addAmount))}
+          className="shrink-0 rounded-lg border border-slate-200 px-1.5 py-1 text-[10px] font-semibold text-[#1958d1] hover:bg-blue-50"
         >
-          Qo‘shish
+          +
         </button>
       </div>
     </div>

@@ -66,17 +66,51 @@ export async function removeDuty(dutyId: number) {
   return { success: true }
 }
 
-// ---- Payments (klasskom-only; enforced by RLS, so a teacher call fails at the DB level) ----
-export async function upsertPayment(
-  studentId: number,
-  period: string,
+// ---- Money collections (klasskom-only; enforced by RLS, so a teacher call fails at the DB level) ----
+export async function createCollection(
+  classId: string,
+  title: string,
   expectedAmount: number,
-  paidAmount: number
+  studentIds: number[]
 ) {
+  const { supabase, user } = await currentUserOrThrow()
+  if (!title.trim()) return { error: 'Sarlavha kiriting' }
+  if (studentIds.length === 0) return { error: 'Kamida bitta o‘quvchi tanlang' }
+
+  const { data: collection, error: collectionError } = await supabase
+    .from('collections')
+    .insert({ class_id: classId, title: title.trim(), expected_amount: expectedAmount, created_by: user.id })
+    .select('id')
+    .single()
+
+  if (collectionError || !collection) return { error: collectionError?.message || 'Yig‘im yaratilmadi' }
+
+  const { error: paymentsError } = await supabase
+    .from('payments')
+    .insert(studentIds.map(studentId => ({ collection_id: collection.id, student_id: studentId, paid_amount: 0 })))
+
+  if (paymentsError) {
+    await supabase.from('collections').delete().eq('id', collection.id)
+    return { error: paymentsError.message }
+  }
+
+  revalidatePath('/')
+  return { success: true }
+}
+
+export async function deleteCollection(collectionId: number) {
+  const { supabase } = await currentUserOrThrow()
+  const { error } = await supabase.from('collections').delete().eq('id', collectionId)
+  if (error) return { error: error.message }
+  revalidatePath('/')
+  return { success: true }
+}
+
+export async function setPaymentAmount(collectionId: number, studentId: number, paidAmount: number) {
   const { supabase } = await currentUserOrThrow()
   const { error } = await supabase.from('payments').upsert(
-    { student_id: studentId, period, expected_amount: expectedAmount, paid_amount: paidAmount },
-    { onConflict: 'student_id,period' }
+    { collection_id: collectionId, student_id: studentId, paid_amount: paidAmount },
+    { onConflict: 'collection_id,student_id' }
   )
   if (error) return { error: error.message }
   revalidatePath('/')
