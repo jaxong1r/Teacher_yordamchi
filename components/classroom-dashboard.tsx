@@ -127,7 +127,18 @@ export default function ClassroomDashboard({
   const role = profile.role
   const className = oneOrNull(profile.class_settings)?.name ?? 'Sinf'
 
-  const [activeTab, setActiveTab] = useState<Tab>('home')
+  const [activeTab, setActiveTabState] = useState<Tab>('home')
+  useEffect(() => {
+    const saved = window.localStorage.getItem('sy-active-tab') as Tab | null
+    if (saved && navItems.some(item => item.id === saved && item.roles.includes(profile.role))) {
+      setActiveTabState(saved)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  function setActiveTab(tab: Tab) {
+    setActiveTabState(tab)
+    window.localStorage.setItem('sy-active-tab', tab)
+  }
   const [mobileNav, setMobileNav] = useState(false)
   const [search, setSearch] = useState('')
   const [toast, setToast] = useState('')
@@ -168,7 +179,7 @@ export default function ClassroomDashboard({
     const supabase = createClient()
     const scheduleRefresh = () => {
       if (refreshTimer.current) clearTimeout(refreshTimer.current)
-      refreshTimer.current = setTimeout(() => refresh(), 600)
+      refreshTimer.current = setTimeout(() => refresh(), 350)
     }
 
     const channel = supabase
