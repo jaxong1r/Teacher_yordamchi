@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import {
   AlertCircle,
   ArrowRight,
@@ -152,12 +153,40 @@ export default function ClassroomDashboard({
 
   function showToast(message: string) {
     setToast(message)
-    window.setTimeout(() => setToast(''), 15000)
+    window.setTimeout(() => setToast(''), 2500)
   }
 
   function refresh() {
     startTransition(() => router.refresh())
   }
+
+  // Silently refresh when anyone else (same class) changes data — no toast,
+  // just the data appearing. Debounced so a burst of changes triggers one
+  // refresh instead of many.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    const supabase = createClient()
+    const scheduleRefresh = () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current)
+      refreshTimer.current = setTimeout(() => refresh(), 600)
+    }
+
+    const channel = supabase
+      .channel(`class-${profile.class_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'duty_schedules' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'collections' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, scheduleRefresh)
+      .subscribe()
+
+    return () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current)
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.class_id])
 
   async function handleAttendance(studentId: number, status: AttendanceStatus) {
     const result = await setAttendance(studentId, today, status)
@@ -288,7 +317,7 @@ export default function ClassroomDashboard({
               setSearch={setSearch}
               onAdd={async (firstName: string, lastName: string) => {
                 const r = await addStudent(profile.class_id, firstName, lastName)
-                showToast(r?.error ? `Xatolik: ${r.error}` : 'O‘quvchi qo‘shildi')
+                showToast(r?.error ? 'Xatolik yuz berdi' : 'O‘quvchi qo‘shildi')
                 refresh()
               }}
               onRemove={async (id: number) => {
@@ -359,7 +388,7 @@ export default function ClassroomDashboard({
       </main>
 
       {toast && (
-        <div role="status" className="fixed bottom-6 left-1/2 z-50 flex max-w-[92vw] -translate-x-1/2 items-start gap-2 whitespace-pre-wrap break-words rounded-xl bg-slate-900 px-4 py-3 text-xs font-medium text-white shadow-xl">
+        <div role="status" className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-xl">
           <CheckCircle2 className="size-4 text-emerald-400" />
           {toast}
         </div>
