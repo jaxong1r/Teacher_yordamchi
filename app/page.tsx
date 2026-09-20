@@ -1,6 +1,7 @@
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { logout } from '@/app/actions/auth'
 import ClassroomDashboard from '@/components/classroom-dashboard'
+import { redirect } from 'next/navigation'
 
 export default async function Page() {
   const supabase = await createClient()
@@ -11,13 +12,36 @@ export default async function Page() {
 
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id, first_name, last_name, username, role, class_id, class_settings(name)')
     .eq('id', user.id)
     .single()
 
-  if (!profile) redirect('/login')
+  if (!profile) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f7f9fc] px-4">
+        <div className="max-w-md rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
+          <h1 className="mb-2 text-lg font-bold text-red-600">Profil topilmadi</h1>
+          <p className="mb-4 text-sm text-slate-500">
+            Siz tizimga kirdingiz, lekin sizning profilingiz ma’lumotlar bazasida topilmadi yoki
+            unga kirish taqiqlangan (RLS). <code>public.profiles</code> jadvalida shu foydalanuvchi
+            uchun qator borligini tekshiring.
+          </p>
+          {profileError && (
+            <pre className="overflow-auto rounded-lg bg-slate-50 p-3 text-left text-[11px] text-slate-500">
+              {profileError.message}
+            </pre>
+          )}
+          <form action={logout} className="mt-4">
+            <button type="submit" className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
+              Chiqish
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
 
   const [{ data: students }, { data: klasskomList }] = await Promise.all([
     supabase

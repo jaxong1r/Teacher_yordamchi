@@ -40,7 +40,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="uz">
-      <body className="antialiased">
+      <body className="antialiased bg-white text-slate-950" style={{ colorScheme: 'light' }}>
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
