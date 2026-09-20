@@ -152,7 +152,7 @@ export default function ClassroomDashboard({
 
   function showToast(message: string) {
     setToast(message)
-    window.setTimeout(() => setToast(''), 2200)
+    window.setTimeout(() => setToast(''), 5000)
   }
 
   function refresh() {
@@ -288,7 +288,7 @@ export default function ClassroomDashboard({
               setSearch={setSearch}
               onAdd={async (firstName: string, lastName: string) => {
                 const r = await addStudent(profile.class_id, firstName, lastName)
-                showToast(r?.error ? 'Xatolik yuz berdi' : 'O‘quvchi qo‘shildi')
+                showToast(r?.error ? `Xatolik: ${r.error}` : 'O‘quvchi qo‘shildi')
                 refresh()
               }}
               onRemove={async (id: number) => {
