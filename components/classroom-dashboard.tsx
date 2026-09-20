@@ -152,7 +152,7 @@ export default function ClassroomDashboard({
 
   function showToast(message: string) {
     setToast(message)
-    window.setTimeout(() => setToast(''), 5000)
+    window.setTimeout(() => setToast(''), 15000)
   }
 
   function refresh() {
@@ -359,7 +359,7 @@ export default function ClassroomDashboard({
       </main>
 
       {toast && (
-        <div role="status" className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-xl">
+        <div role="status" className="fixed bottom-6 left-1/2 z-50 flex max-w-[92vw] -translate-x-1/2 items-start gap-2 whitespace-pre-wrap break-words rounded-xl bg-slate-900 px-4 py-3 text-xs font-medium text-white shadow-xl">
           <CheckCircle2 className="size-4 text-emerald-400" />
           {toast}
         </div>

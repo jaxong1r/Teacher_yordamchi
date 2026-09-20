@@ -18,7 +18,19 @@ export async function addStudent(classId: string, firstName: string, lastName: s
   const { error } = await supabase
     .from('students')
     .insert({ class_id: classId, first_name: firstName, last_name: lastName })
-  if (error) return { error: error.message }
+  if (error) {
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData.session?.access_token
+    let jwtPayload = 'no-token'
+    if (token) {
+      try {
+        jwtPayload = Buffer.from(token.split('.')[1], 'base64').toString('utf-8')
+      } catch {
+        jwtPayload = 'decode-failed'
+      }
+    }
+    return { error: `${error.message} | jwt=${jwtPayload} | classId=${classId}` }
+  }
   revalidatePath('/')
   return { success: true }
 }
