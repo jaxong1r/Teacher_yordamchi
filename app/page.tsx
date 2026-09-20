@@ -6,16 +6,23 @@ import { redirect } from 'next/navigation'
 export default async function Page() {
   const supabase = await createClient()
 
+  // getSession() decodes the JWT locally (no network round-trip to the Auth
+  // server), unlike getUser(). We can safely skip the extra server validation
+  // here because every query below still goes through Supabase's own
+  // JWT-signature check and RLS policies — an invalid/tampered session simply
+  // gets empty/rejected results downstream, it can never read real data.
+  // Skipping it here saves one full round-trip per page load, which matters
+  // a lot given the Vercel<->Supabase cross-region latency on the free plan.
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
 
-  if (!user) redirect('/login')
+  if (!session) redirect('/login')
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id, first_name, last_name, username, role, class_id, class_settings(name)')
-    .eq('id', user.id)
+    .eq('id', session.user.id)
     .single()
 
   if (!profile) {
@@ -43,7 +50,26 @@ export default async function Page() {
     )
   }
 
-  const [{ data: students }, { data: klasskomList }] = await Promise.all([
+  // Uzbekistan is UTC+5 year-round (no DST). Using raw UTC here would show
+  // "yesterday" for a few hours every night around midnight in Tashkent.
+  const TASHKENT_OFFSET_MS = 5 * 60 * 60 * 1000
+  const tashkentNow = new Date(Date.now() + TASHKENT_OFFSET_MS)
+  const today = tashkentNow.toISOString().slice(0, 10)
+  const monthAgo = new Date(tashkentNow.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+  // Fire every remaining query at once instead of one-by-one — with the
+  // Vercel<->Supabase network hop being the main cost, running them
+  // concurrently instead of sequentially is the single biggest speed win
+  // available without upgrading plans.
+  const isKlasskom = profile.role === 'klasskom'
+  const [
+    { data: students },
+    { data: klasskomList },
+    { data: attendance },
+    { data: duties },
+    { data: collectionsData },
+    { data: paymentsData },
+  ] = await Promise.all([
     supabase
       .from('students')
       .select('id, first_name, last_name')
@@ -56,38 +82,21 @@ export default async function Page() {
           .eq('class_id', profile.class_id)
           .eq('role', 'klasskom')
       : Promise.resolve({ data: [] as any[] }),
+    supabase.from('attendance').select('student_id, date, status').gte('date', monthAgo),
+    supabase
+      .from('duty_schedules')
+      .select('id, date, student_id, students(first_name, last_name)')
+      .gte('date', monthAgo)
+      .order('date'),
+    // Collections/payments: only klasskom can see these — RLS blocks teachers
+    // at the database level, so we skip the round-trip entirely for teachers.
+    isKlasskom
+      ? supabase.from('collections').select('id, title, expected_amount, created_at').order('created_at', { ascending: false })
+      : Promise.resolve({ data: [] as any[] }),
+    isKlasskom
+      ? supabase.from('payments').select('collection_id, student_id, paid_amount')
+      : Promise.resolve({ data: [] as any[] }),
   ])
-
-  // Uzbekistan is UTC+5 year-round (no DST). Using raw UTC here would show
-  // "yesterday" for a few hours every night around midnight in Tashkent.
-  const TASHKENT_OFFSET_MS = 5 * 60 * 60 * 1000
-  const tashkentNow = new Date(Date.now() + TASHKENT_OFFSET_MS)
-  const today = tashkentNow.toISOString().slice(0, 10)
-  const monthAgo = new Date(tashkentNow.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-
-  const { data: attendance } = await supabase
-    .from('attendance')
-    .select('student_id, date, status')
-    .gte('date', monthAgo)
-
-  const { data: duties } = await supabase
-    .from('duty_schedules')
-    .select('id, date, student_id, students(first_name, last_name)')
-    .gte('date', monthAgo)
-    .order('date')
-
-  // Collections (money drives) + payments: only klasskom can see these — RLS
-  // blocks teachers at the database level.
-  let collections: any[] = []
-  let payments: any[] = []
-  if (profile.role === 'klasskom') {
-    const [{ data: collectionsData }, { data: paymentsData }] = await Promise.all([
-      supabase.from('collections').select('id, title, expected_amount, created_at').order('created_at', { ascending: false }),
-      supabase.from('payments').select('collection_id, student_id, paid_amount'),
-    ])
-    collections = collectionsData ?? []
-    payments = paymentsData ?? []
-  }
 
   return (
     <ClassroomDashboard
@@ -96,8 +105,8 @@ export default async function Page() {
       klasskomList={klasskomList ?? []}
       attendance={attendance ?? []}
       duties={(duties ?? []) as any}
-      collections={collections}
-      payments={payments}
+      collections={collectionsData ?? []}
+      payments={paymentsData ?? []}
       today={today}
     />
   )

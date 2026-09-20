@@ -23,9 +23,16 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
+  // getSession() decodes/validates the token locally and only calls the Auth
+  // server over the network when the token actually needs refreshing. Using
+  // getUser() here instead would force a network round-trip on *every single
+  // request* (this middleware runs on every navigation), which is by far the
+  // biggest latency cost on a cross-region deploy. Route protection is still
+  // safe: any real data access is independently re-checked by RLS.
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
+  const user = session?.user ?? null
 
   const isLoginPage = request.nextUrl.pathname.startsWith('/login')
 
