@@ -65,16 +65,25 @@ create table public.payments (
 );
 
 -- ---------- Row Level Security ----------
--- NOTE ON DESIGN: every policy below uses a plain inline subquery against
--- `profiles` (scoped by `id = auth.uid()`), never a SECURITY DEFINER helper
--- function. An earlier version of this schema used `my_class_id()`/`my_role()`
--- SECURITY DEFINER functions to avoid re-querying `profiles` under RLS, but in
--- practice that privilege escalation was NOT reliably honored in this hosted
--- Supabase environment, which silently broke every policy that depended on it
--- (profile lookups, student inserts, etc). The inline-subquery approach below
--- works instead because it depends only on the one proven-reliable policy:
--- "a user can always read their own profile row" (id = auth.uid(), no
--- cross-row lookup needed) — every other policy composes on top of that.
+-- DESIGN NOTE: role + class_id are read straight from the JWT's app_metadata
+-- (auth.jwt() -> 'app_metadata'), never via a table lookup. Two earlier designs
+-- were tried and both failed in practice:
+--   1. A SECURITY DEFINER helper function (my_class_id()) meant to bypass RLS
+--      when looking up the caller's own profile row - this did not reliably
+--      bypass RLS in this hosted environment, silently breaking every policy
+--      that depended on it.
+--   2. A plain subquery against `profiles` used from the `profiles` table's
+--      OWN policy - Postgres unconditionally rejects this as
+--      "infinite recursion detected in policy for relation profiles", even
+--      though it would have terminated logically.
+-- Storing role/class_id in the JWT sidesteps both problems entirely: no table
+-- lookup, no recursion, and it's the standard multi-tenant RLS pattern.
+--
+-- IMPORTANT: app_metadata is embedded in a JWT at the moment it's issued. A
+-- user whose app_metadata is updated (e.g. via SQL, or admin.updateUserById)
+-- must log out and log back in (or wait for their token to refresh) before
+-- the change takes effect in RLS checks. New accounts created via
+-- admin.createUser({ app_metadata }) get this immediately on first login.
 
 alter table public.class_settings enable row level security;
 alter table public.profiles enable row level security;
@@ -84,71 +93,70 @@ alter table public.duty_schedules enable row level security;
 alter table public.collections enable row level security;
 alter table public.payments enable row level security;
 
--- class_settings: a user can see their own class
 create policy "read own class" on public.class_settings for select
-  using (id in (select class_id from public.profiles where id = auth.uid()));
+  using (id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid);
 
--- profiles: a user can always read their own row, and every profile in their
--- class (teacher needs to see klasskom, and vice versa)
+-- profiles: a user can always read their own row (simple, non-recursive), and
+-- every profile in their class (teacher needs to see klasskom, and vice versa)
 create policy "users can read own profile" on public.profiles for select
   using (id = auth.uid());
 create policy "read profiles in my class" on public.profiles for select
-  using (class_id in (select class_id from public.profiles where id = auth.uid()));
+  using (class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid);
 -- No insert/update/delete policy for normal users: accounts are only created/edited
 -- through the server-side admin client (service_role key), which bypasses RLS.
 
 -- students: both roles in the same class can read and manage the roster
 create policy "read students in my class" on public.students for select
-  using (class_id in (select class_id from public.profiles where id = auth.uid()));
+  using (class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid);
 create policy "manage students in my class" on public.students for all
-  using (class_id in (select class_id from public.profiles where id = auth.uid()))
-  with check (class_id in (select class_id from public.profiles where id = auth.uid()));
+  using (class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid)
+  with check (class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid);
 
 -- attendance: both roles can read and mark attendance for students in their class
 create policy "read attendance in my class" on public.attendance for select
-  using (exists (select 1 from public.students s where s.id = student_id and s.class_id in (select class_id from public.profiles where id = auth.uid())));
+  using (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid));
 create policy "manage attendance in my class" on public.attendance for all
-  using (exists (select 1 from public.students s where s.id = student_id and s.class_id in (select class_id from public.profiles where id = auth.uid())))
-  with check (exists (select 1 from public.students s where s.id = student_id and s.class_id in (select class_id from public.profiles where id = auth.uid())));
+  using (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid))
+  with check (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid));
 
 -- duty_schedules: both roles can read and manage the roster for their class
 create policy "read duties in my class" on public.duty_schedules for select
-  using (exists (select 1 from public.students s where s.id = student_id and s.class_id in (select class_id from public.profiles where id = auth.uid())));
+  using (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid));
 create policy "manage duties in my class" on public.duty_schedules for all
-  using (exists (select 1 from public.students s where s.id = student_id and s.class_id in (select class_id from public.profiles where id = auth.uid())))
-  with check (exists (select 1 from public.students s where s.id = student_id and s.class_id in (select class_id from public.profiles where id = auth.uid())));
+  using (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid))
+  with check (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid));
 
 -- collections + payments: KLASSKOM ONLY. A teacher's queries against these tables
 -- return zero rows and are rejected at the database level, regardless of what
 -- the app code does.
 create policy "klasskom reads collections in their class" on public.collections for select
   using (
-    (select role from public.profiles where id = auth.uid()) = 'klasskom'
-    and class_id in (select class_id from public.profiles where id = auth.uid())
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'klasskom'
+    and class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid
   );
 create policy "klasskom manages collections in their class" on public.collections for all
   using (
-    (select role from public.profiles where id = auth.uid()) = 'klasskom'
-    and class_id in (select class_id from public.profiles where id = auth.uid())
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'klasskom'
+    and class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid
   )
   with check (
-    (select role from public.profiles where id = auth.uid()) = 'klasskom'
-    and class_id in (select class_id from public.profiles where id = auth.uid())
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'klasskom'
+    and class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid
   );
 
 create policy "klasskom reads payments in their class" on public.payments for select
   using (
-    (select role from public.profiles where id = auth.uid()) = 'klasskom'
-    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id in (select class_id from public.profiles where id = auth.uid()))
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'klasskom'
+    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid)
   );
 create policy "klasskom manages payments in their class" on public.payments for all
   using (
-    (select role from public.profiles where id = auth.uid()) = 'klasskom'
-    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id in (select class_id from public.profiles where id = auth.uid()))
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'klasskom'
+    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid)
   )
   with check (
-    (select role from public.profiles where id = auth.uid()) = 'klasskom'
-    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id in (select class_id from public.profiles where id = auth.uid()))
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'klasskom'
+    and exists (select 1 from public.collections c where c.id = collection_id and c.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid)
   );
 
 -- ---------- Optional: keep only the last ~31 days of attendance ----------
@@ -168,5 +176,10 @@ create policy "klasskom manages payments in their class" on public.payments for 
 -- 3. Copy the generated User UID, then run (replace the placeholders):
 --    insert into public.profiles (id, first_name, last_name, username, role, class_id)
 --    values ('<TEACHER_USER_UID>', 'Ism', 'Familiya', '<username>', 'teacher', '<CLASS_ID>');
+-- 4. Put role + class_id into the teacher's JWT (klasskom accounts get this
+--    automatically going forward, see app/actions/klasskom.ts):
+--    update auth.users set raw_app_meta_data = raw_app_meta_data ||
+--      jsonb_build_object('role', 'teacher', 'class_id', '<CLASS_ID>')
+--    where id = '<TEACHER_USER_UID>';
 -- After this, the teacher logs in at /login with that username/password and can
 -- create the klasskom account directly from the app's "Klasskom" panel.

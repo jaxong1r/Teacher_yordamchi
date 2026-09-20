@@ -44,6 +44,7 @@ export async function createKlasskomAccount(formData: FormData) {
     email: usernameToEmail(username),
     password,
     email_confirm: true,
+    app_metadata: { role: 'klasskom', class_id: profile.class_id },
   })
 
   if (createError || !created.user) {
