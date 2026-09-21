@@ -614,6 +614,11 @@ function AttendanceView({ students, attendance, today, update, markAll }: {
   }, [attendance, selectedDate])
 
   const isToday = selectedDate === today
+  const sortedStudents = [...students].sort((a, b) => {
+    const an = fullName(a).toLowerCase()
+    const bn = fullName(b).toLowerCase()
+    return an < bn ? -1 : an > bn ? 1 : 0
+  })
 
   return (
     <>
@@ -654,11 +659,11 @@ function AttendanceView({ students, attendance, today, update, markAll }: {
         <div className="hidden grid-cols-[1fr_240px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:grid">
           <span>O‘quvchi</span><span className="text-center">Holati</span>
         </div>
-        {students.map(student => (
+        {sortedStudents.map((student, index) => (
           <div key={student.id} className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3.5 last:border-0 sm:grid sm:grid-cols-[1fr_240px] sm:items-center sm:gap-0">
             <div className="flex items-center gap-3">
               <div className={`flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
-              <div><p className="text-sm font-semibold">{fullName(student)}</p><p className="text-[11px] text-slate-400">ID: {String(student.id).padStart(3, '0')}</p></div>
+              <div><p className="text-sm font-semibold">{fullName(student)}</p><p className="text-[11px] text-slate-400">№ {index + 1}</p></div>
             </div>
             <div className="flex justify-start gap-1.5 sm:justify-center">
               <StatusButton active={dayMap[student.id] === 'present'} onClick={() => update(student.id, selectedDate, 'present')} tone="present" label="Bor" />
