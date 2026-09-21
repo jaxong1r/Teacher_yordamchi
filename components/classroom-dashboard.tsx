@@ -684,6 +684,12 @@ function StudentsView({ students, search, setSearch, onAdd, onRemove }: {
   const [lastName, setLastName] = useState('')
   const [showForm, setShowForm] = useState(false)
 
+  const sortedStudents = [...students].sort((a, b) => {
+    const an = fullName(a).toLowerCase()
+    const bn = fullName(b).toLowerCase()
+    return an < bn ? -1 : an > bn ? 1 : 0
+  })
+
   return (
     <>
       <SectionHeader
@@ -707,12 +713,12 @@ function StudentsView({ students, search, setSearch, onAdd, onRemove }: {
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="O‘quvchini qidirish..." className="w-full bg-transparent text-sm text-slate-950 outline-none placeholder:text-slate-400" style={{ colorScheme: 'light' }} />
       </div>
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid grid-cols-[70px_1fr_80px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-          <span>ID</span><span>O‘quvchi</span><span className="text-right">Amal</span>
+        <div className="grid grid-cols-[50px_1fr_80px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+          <span>№</span><span>O‘quvchi</span><span className="text-right">Amal</span>
         </div>
-        {students.map(student => (
-          <div key={student.id} className="grid grid-cols-[70px_1fr_80px] items-center border-b border-slate-100 px-5 py-3.5 last:border-0">
-            <span className="font-mono text-xs text-slate-400">#{String(student.id).padStart(3, '0')}</span>
+        {sortedStudents.map((student, index) => (
+          <div key={student.id} className="grid grid-cols-[50px_1fr_80px] items-center border-b border-slate-100 px-5 py-3.5 last:border-0">
+            <span className="text-sm font-semibold text-slate-400">{index + 1}</span>
             <div className="flex items-center gap-3">
               <div className={`flex size-9 items-center justify-center rounded-full text-xs font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
               <p className="text-sm font-semibold">{fullName(student)}</p>
