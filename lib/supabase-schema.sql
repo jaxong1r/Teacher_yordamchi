@@ -38,12 +38,17 @@ create table public.attendance (
   unique(student_id, date)
 );
 
-create table public.duty_schedules (
+-- Weekly recurring duty roster: a (day_of_week, student) pair means that
+-- student is on duty every week on that day. day_of_week follows JS
+-- Date.getDay(): 1=Monday ... 6=Saturday. There is no 0 (Sunday) — no school.
+create table public.duty_roster (
   id bigint generated always as identity primary key,
+  class_id uuid not null references public.class_settings(id) on delete cascade,
+  day_of_week smallint not null check (day_of_week between 1 and 6),
   student_id bigint not null references public.students(id) on delete cascade,
-  date date not null,
   created_by uuid not null references public.profiles(id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  unique(class_id, day_of_week, student_id)
 );
 
 create table public.collections (
@@ -68,10 +73,10 @@ create table public.payments (
 -- DESIGN NOTE: role + class_id are read straight from the JWT's app_metadata
 -- (auth.jwt() -> 'app_metadata'), never via a table lookup. Two earlier designs
 -- were tried and both failed in practice:
---   1. A SECURITY DEFINER helper function (my_class_id()) meant to bypass RLS
---      when looking up the caller's own profile row - this did not reliably
---      bypass RLS in this hosted environment, silently breaking every policy
---      that depended on it.
+--   1. A SECURITY DEFINER helper function meant to bypass RLS when looking up
+--      the caller's own profile row - this did not reliably bypass RLS in
+--      this hosted environment, silently breaking every policy that depended
+--      on it.
 --   2. A plain subquery against `profiles` used from the `profiles` table's
 --      OWN policy - Postgres unconditionally rejects this as
 --      "infinite recursion detected in policy for relation profiles", even
@@ -89,12 +94,21 @@ alter table public.class_settings enable row level security;
 alter table public.profiles enable row level security;
 alter table public.students enable row level security;
 alter table public.attendance enable row level security;
-alter table public.duty_schedules enable row level security;
+alter table public.duty_roster enable row level security;
 alter table public.collections enable row level security;
 alter table public.payments enable row level security;
 
 create policy "read own class" on public.class_settings for select
   using (id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid);
+create policy "teacher can rename own class" on public.class_settings for update
+  using (
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'teacher'
+    and id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid
+  )
+  with check (
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'teacher'
+    and id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid
+  );
 
 -- profiles: a user can always read their own row (simple, non-recursive), and
 -- every profile in their class (teacher needs to see klasskom, and vice versa)
@@ -102,8 +116,10 @@ create policy "users can read own profile" on public.profiles for select
   using (id = auth.uid());
 create policy "read profiles in my class" on public.profiles for select
   using (class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid);
--- No insert/update/delete policy for normal users: accounts are only created/edited
--- through the server-side admin client (service_role key), which bypasses RLS.
+-- No insert/delete policy for normal users: accounts are only created through
+-- the server-side admin client (service_role key), which bypasses RLS. Each
+-- user CAN change their own password via supabase.auth.updateUser(), which
+-- goes through the Auth API, not a direct table write, so it needs no policy.
 
 -- students: both roles in the same class can read and manage the roster
 create policy "read students in my class" on public.students for select
@@ -119,12 +135,12 @@ create policy "manage attendance in my class" on public.attendance for all
   using (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid))
   with check (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid));
 
--- duty_schedules: both roles can read and manage the roster for their class
-create policy "read duties in my class" on public.duty_schedules for select
-  using (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid));
-create policy "manage duties in my class" on public.duty_schedules for all
-  using (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid))
-  with check (exists (select 1 from public.students s where s.id = student_id and s.class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid));
+-- duty_roster: both roles can read and manage the weekly roster for their class
+create policy "read duty roster in my class" on public.duty_roster for select
+  using (class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid);
+create policy "manage duty roster in my class" on public.duty_roster for all
+  using (class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid)
+  with check (class_id = ((auth.jwt() -> 'app_metadata' ->> 'class_id'))::uuid);
 
 -- collections + payments: KLASSKOM ONLY. A teacher's queries against these tables
 -- return zero rows and are rejected at the database level, regardless of what
@@ -183,3 +199,13 @@ create policy "klasskom manages payments in their class" on public.payments for 
 --    where id = '<TEACHER_USER_UID>';
 -- After this, the teacher logs in at /login with that username/password and can
 -- create the klasskom account directly from the app's "Klasskom" panel.
+
+-- ---------- Realtime (optional but recommended) ----------
+-- Lets both roles see each other's changes appear live without a manual
+-- refresh. Run once:
+-- alter publication supabase_realtime add table public.students;
+-- alter publication supabase_realtime add table public.attendance;
+-- alter publication supabase_realtime add table public.duty_roster;
+-- alter publication supabase_realtime add table public.collections;
+-- alter publication supabase_realtime add table public.payments;
+-- alter publication supabase_realtime add table public.profiles;

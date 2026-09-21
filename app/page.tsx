@@ -83,11 +83,7 @@ export default async function Page() {
           .eq('role', 'klasskom')
       : Promise.resolve({ data: [] as any[] }),
     supabase.from('attendance').select('student_id, date, status').gte('date', monthAgo),
-    supabase
-      .from('duty_schedules')
-      .select('id, date, student_id, students(first_name, last_name)')
-      .gte('date', monthAgo)
-      .order('date'),
+    supabase.from('duty_roster').select('id, day_of_week, student_id'),
     // Collections/payments: only klasskom can see these — RLS blocks teachers
     // at the database level, so we skip the round-trip entirely for teachers.
     isKlasskom

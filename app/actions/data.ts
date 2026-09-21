@@ -47,22 +47,47 @@ export async function setAttendance(
   return { success: true }
 }
 
-// ---- Duty roster ----
-export async function addDuty(studentId: number, date: string) {
+// ---- Weekly duty roster (repeats every week automatically; no Sunday) ----
+export async function toggleDutyRosterEntry(
+  classId: string,
+  dayOfWeek: number,
+  studentId: number,
+  onDuty: boolean
+) {
   const { supabase, user } = await currentUserOrThrow()
-  const { error } = await supabase
-    .from('duty_schedules')
-    .insert({ student_id: studentId, date, created_by: user.id })
+  if (onDuty) {
+    const { error } = await supabase
+      .from('duty_roster')
+      .insert({ class_id: classId, day_of_week: dayOfWeek, student_id: studentId, created_by: user.id })
+    if (error) return { error: error.message }
+  } else {
+    const { error } = await supabase
+      .from('duty_roster')
+      .delete()
+      .eq('class_id', classId)
+      .eq('day_of_week', dayOfWeek)
+      .eq('student_id', studentId)
+    if (error) return { error: error.message }
+  }
+  revalidatePath('/')
+  return { success: true }
+}
+
+// ---- Class settings ----
+export async function renameClass(classId: string, name: string) {
+  const { supabase } = await currentUserOrThrow()
+  if (!name.trim()) return { error: 'Sinf nomini kiriting' }
+  const { error } = await supabase.from('class_settings').update({ name: name.trim() }).eq('id', classId)
   if (error) return { error: error.message }
   revalidatePath('/')
   return { success: true }
 }
 
-export async function removeDuty(dutyId: number) {
+export async function changeOwnPassword(newPassword: string) {
   const { supabase } = await currentUserOrThrow()
-  const { error } = await supabase.from('duty_schedules').delete().eq('id', dutyId)
+  if (newPassword.length < 6) return { error: 'Parol kamida 6 belgidan iborat bo‘lsin' }
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
   if (error) return { error: error.message }
-  revalidatePath('/')
   return { success: true }
 }
 

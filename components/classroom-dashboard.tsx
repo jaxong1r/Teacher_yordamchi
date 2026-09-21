@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
-  AlertCircle,
   ArrowRight,
+  Bell,
   BarChart3,
   CalendarDays,
   Check,
@@ -13,6 +13,7 @@ import {
   CircleDollarSign,
   ClipboardCheck,
   GraduationCap,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -31,7 +32,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { logout } from '@/app/actions/auth'
 import { createKlasskomAccount, resetKlasskomPassword } from '@/app/actions/klasskom'
-import { addStudent, removeStudent, setAttendance, addDuty, removeDuty, createCollection, deleteCollection, setPaymentAmount } from '@/app/actions/data'
+import { addStudent, removeStudent, setAttendance, toggleDutyRosterEntry, createCollection, deleteCollection, setPaymentAmount, renameClass, changeOwnPassword } from '@/app/actions/data'
 
 type Role = 'teacher' | 'klasskom'
 type Tab = 'home' | 'attendance' | 'students' | 'duties' | 'monitor' | 'payments' | 'settings'
@@ -40,7 +41,7 @@ type AttendanceStatus = 'present' | 'absent' | 'excused'
 type StudentRow = { id: number; first_name: string; last_name: string }
 type KlasskomRow = { id: string; first_name: string; last_name: string; username: string }
 type AttendanceRow = { student_id: number; date: string; status: AttendanceStatus }
-type DutyRow = { id: number; date: string; student_id: number; students: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] }
+type DutyRow = { id: number; day_of_week: number; student_id: number }
 type CollectionRow = { id: number; title: string; expected_amount: number; created_at: string }
 type PaymentRow = { collection_id: number; student_id: number; paid_amount: number }
 type Profile = {
@@ -52,6 +53,15 @@ type Profile = {
   class_id: string
   class_settings: { name: string } | { name: string }[] | null
 }
+
+const WEEKDAYS = [
+  { dow: 1, label: 'Dush' },
+  { dow: 2, label: 'Sesh' },
+  { dow: 3, label: 'Chor' },
+  { dow: 4, label: 'Pay' },
+  { dow: 5, label: 'Jum' },
+  { dow: 6, label: 'Shan' },
+]
 
 const ACCENTS = [
   'bg-sky-100 text-sky-700',
@@ -93,6 +103,14 @@ function formatUzDate(dateStr: string, style: 'long' | 'short' = 'short') {
   const year = d.getFullYear()
   if (style === 'long') return `${day} ${UZ_MONTHS[month]} ${year}`
   return `${String(day).padStart(2, '0')}.${String(month + 1).padStart(2, '0')}.${year}`
+}
+function dowOf(dateStr: string) {
+  return new Date(`${dateStr}T00:00:00`).getDay() // 0=Sunday, 1=Monday, ... 6=Saturday
+}
+function addDaysToDateStr(dateStr: string, delta: number) {
+  const d = new Date(`${dateStr}T00:00:00`)
+  d.setDate(d.getDate() + delta)
+  return d.toISOString().slice(0, 10)
 }
 const navItems: { id: Tab; label: string; icon: typeof LayoutDashboard; roles: Role[] }[] = [
   { id: 'home', label: 'Bosh sahifa', icon: LayoutDashboard, roles: ['teacher', 'klasskom'] },
@@ -157,6 +175,16 @@ export default function ClassroomDashboard({
   const absentCount = Object.values(attendanceToday).filter(s => s === 'absent').length
   const excusedCount = Object.values(attendanceToday).filter(s => s === 'excused').length
 
+  const todayDow = dowOf(today)
+  const todaysDutyStudents = useMemo(() => {
+    if (todayDow === 0) return [] // Sunday: no school, no duty
+    const ids = new Set(duties.filter(d => d.day_of_week === todayDow).map(d => d.student_id))
+    return students.filter(s => ids.has(s.id))
+  }, [duties, students, todayDow])
+
+  const [notifOpen, setNotifOpen] = useState(false)
+  const hasNotifications = absentCount > 0 || (todayDow !== 0 && todaysDutyStudents.length === 0)
+
   const paymentStats = useMemo(() => {
     const total = payments.reduce((sum, p) => sum + p.paid_amount, 0)
     return { activeCollections: collections.length, total }
@@ -186,7 +214,7 @@ export default function ClassroomDashboard({
       .channel(`class-${profile.class_id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'duty_schedules' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'duty_roster' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'collections' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, scheduleRefresh)
@@ -199,14 +227,14 @@ export default function ClassroomDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.class_id])
 
-  async function handleAttendance(studentId: number, status: AttendanceStatus) {
-    const result = await setAttendance(studentId, today, status)
+  async function handleAttendance(studentId: number, date: string, status: AttendanceStatus) {
+    const result = await setAttendance(studentId, date, status)
     if (result?.error) showToast('Xatolik: saqlanmadi')
     else refresh()
   }
 
-  async function handleMarkAll(status: AttendanceStatus) {
-    await Promise.all(students.map(s => setAttendance(s.id, today, status)))
+  async function handleMarkAll(date: string, status: AttendanceStatus) {
+    await Promise.all(students.map(s => setAttendance(s.id, date, status)))
     showToast('Barchasi belgilandi')
     refresh()
   }
@@ -288,10 +316,38 @@ export default function ClassroomDashboard({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button aria-label="Bildirishnomalar" className="relative rounded-xl p-2.5 text-slate-500 hover:bg-slate-100">
-              <span className="absolute right-2 top-2 size-1.5 rounded-full bg-red-500" />
-              <AlertCircle className="size-[18px]" />
-            </button>
+            <div className="relative">
+              <button
+                aria-label="Bildirishnomalar"
+                onClick={() => setNotifOpen(v => !v)}
+                className="relative rounded-xl p-2.5 text-slate-500 hover:bg-slate-100"
+              >
+                {hasNotifications && <span className="absolute right-2 top-2 size-1.5 rounded-full bg-red-500" />}
+                <Bell className="size-[18px]" />
+              </button>
+              {notifOpen && (
+                <>
+                  <button aria-label="Yopish" className="fixed inset-0 z-30" onClick={() => setNotifOpen(false)} />
+                  <div className="absolute right-0 top-12 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+                    <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Bugungi holat</p>
+                    <div className="space-y-2 text-sm">
+                      <p className="flex items-center gap-2">
+                        <XCircle className="size-4 shrink-0 text-red-500" />
+                        {absentCount > 0 ? `${absentCount} nafar o‘quvchi yo‘q` : 'Hammasi joyida — yo‘q bo‘lgan yo‘q'}
+                      </p>
+                      <p className="flex items-center gap-2">
+                        <CalendarDays className="size-4 shrink-0 text-amber-500" />
+                        {todayDow === 0
+                          ? 'Bugun yakshanba — navbatchilik yo‘q'
+                          : todaysDutyStudents.length > 0
+                            ? `Bugungi navbatchi: ${todaysDutyStudents.map(fullName).join(', ')}`
+                            : 'Bugunga navbatchi belgilanmagan'}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <div className="hidden size-9 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white sm:flex">
               {initialsOf(profile)}
             </div>
@@ -306,7 +362,8 @@ export default function ClassroomDashboard({
               presentCount={presentCount}
               absentCount={absentCount}
               excusedCount={excusedCount}
-              duties={duties}
+              todaysDutyStudents={todaysDutyStudents}
+              todayDow={todayDow}
               today={today}
               paymentStats={paymentStats}
               go={setActiveTab}
@@ -315,10 +372,10 @@ export default function ClassroomDashboard({
           {activeTab === 'attendance' && (
             <AttendanceView
               students={students}
-              attendance={attendanceToday}
+              attendance={attendance}
+              today={today}
               update={handleAttendance}
               markAll={handleMarkAll}
-              today={today}
             />
           )}
           {activeTab === 'students' && (
@@ -342,15 +399,9 @@ export default function ClassroomDashboard({
             <DutiesView
               students={students}
               duties={duties}
-              today={today}
-              onAdd={async (studentId: number, date: string) => {
-                await addDuty(studentId, date)
-                showToast('Navbatchi qo‘shildi')
-                refresh()
-              }}
-              onRemove={async (id: number) => {
-                await removeDuty(id)
-                showToast('O‘chirildi')
+              onToggle={async (dayOfWeek: number, studentId: number, onDuty: boolean) => {
+                const r = await toggleDutyRosterEntry(profile.class_id, dayOfWeek, studentId, onDuty)
+                if (r?.error) showToast('Xatolik yuz berdi')
                 refresh()
               }}
             />
@@ -394,7 +445,24 @@ export default function ClassroomDashboard({
               }}
             />
           )}
-          {activeTab === 'settings' && <SettingsView role={role} className={className} />}
+          {activeTab === 'settings' && (
+            <SettingsView
+              role={role}
+              className={className}
+              profileName={fullName(profile)}
+              onRenameClass={async (name: string) => {
+                const r = await renameClass(profile.class_id, name)
+                showToast(r?.error ? r.error : 'Sinf nomi yangilandi')
+                refresh()
+                return r
+              }}
+              onChangePassword={async (password: string) => {
+                const r = await changeOwnPassword(password)
+                showToast(r?.error ? r.error : 'Parol yangilandi')
+                return r
+              }}
+            />
+          )}
         </div>
       </main>
 
@@ -439,18 +507,18 @@ function StatCard({ label, value, helper, icon: Icon, tone = 'blue' }: { label: 
   )
 }
 
-function HomeView({ role, students, presentCount, absentCount, excusedCount, duties, today, paymentStats, go }: {
+function HomeView({ role, students, presentCount, absentCount, excusedCount, todaysDutyStudents, todayDow, today, paymentStats, go }: {
   role: Role
   students: StudentRow[]
   presentCount: number
   absentCount: number
   excusedCount: number
-  duties: DutyRow[]
+  todaysDutyStudents: StudentRow[]
+  todayDow: number
   today: string
   paymentStats: { activeCollections: number; total: number }
   go: (tab: Tab) => void
 }) {
-  const todaysDuties = duties.filter(d => d.date === today)
   const attendanceRate = students.length ? Math.round((presentCount / students.length) * 100) : 0
 
   return (
@@ -465,7 +533,7 @@ function HomeView({ role, students, presentCount, absentCount, excusedCount, dut
         <StatCard label="Bugungi kelganlar" value={`${presentCount} / ${students.length}`} helper="Davomat holati" icon={CheckCircle2} tone="green" />
         <StatCard label="Bugungi kelmaganlar" value={`${absentCount}`} helper="E'tibor talab qiladi" icon={XCircle} tone="red" />
         <StatCard label="O‘quvchilar" value={`${students.length}`} helper="Sinf ro‘yxati" icon={Users} />
-        <StatCard label="Bugungi navbatchilar" value={`${todaysDuties.length}`} helper={formatUzDate(today)} icon={CalendarDays} tone="amber" />
+        <StatCard label="Bugungi navbatchilar" value={todayDow === 0 ? '—' : `${todaysDutyStudents.length}`} helper={todayDow === 0 ? 'Yakshanba — dars yo‘q' : formatUzDate(today)} icon={CalendarDays} tone="amber" />
         {role === 'klasskom' && (
           <StatCard label="Pul yig‘imi" value={`${paymentStats.activeCollections} ta yig‘im`} helper={`${formatMoney(paymentStats.total)} yig‘ildi`} icon={WalletCards} tone="amber" />
         )}
@@ -499,23 +567,20 @@ function HomeView({ role, students, presentCount, absentCount, excusedCount, dut
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-bold">Bugungi navbatchilar</h3>
-              <p className="mt-1 text-xs text-slate-400">Navbatchilik jadvali</p>
+              <p className="mt-1 text-xs text-slate-400">Haftalik navbatchilik jadvali</p>
             </div>
             <button onClick={() => go('duties')} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50"><MoreHorizontal className="size-5" /></button>
           </div>
           <div className="mt-5 space-y-3">
-            {todaysDuties.length === 0 && <p className="text-sm text-slate-400">Bugun uchun navbatchi belgilanmagan</p>}
-            {todaysDuties.map(d => {
-              const s = oneOrNull(d.students)
-              if (!s) return null
-              return (
-                <div key={d.id} className="flex items-center gap-3 rounded-xl bg-slate-50 p-3">
-                  <div className="flex size-9 items-center justify-center rounded-full bg-sky-100 text-xs font-bold text-sky-700">{initialsOf(s)}</div>
-                  <div className="flex-1"><p className="text-sm font-semibold">{fullName(s)}</p><p className="text-[11px] text-slate-400">Bugungi navbatchi</p></div>
-                  <Check className="size-4 text-emerald-500" />
-                </div>
-              )
-            })}
+            {todayDow === 0 && <p className="text-sm text-slate-400">Bugun yakshanba — dars va navbatchilik yo‘q</p>}
+            {todayDow !== 0 && todaysDutyStudents.length === 0 && <p className="text-sm text-slate-400">Bugun uchun navbatchi belgilanmagan</p>}
+            {todaysDutyStudents.map(s => (
+              <div key={s.id} className="flex items-center gap-3 rounded-xl bg-slate-50 p-3">
+                <div className="flex size-9 items-center justify-center rounded-full bg-sky-100 text-xs font-bold text-sky-700">{initialsOf(s)}</div>
+                <div className="flex-1"><p className="text-sm font-semibold">{fullName(s)}</p><p className="text-[11px] text-slate-400">Bugungi navbatchi</p></div>
+                <Check className="size-4 text-emerald-500" />
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -532,40 +597,73 @@ function StatusButton({ active, onClick, tone, label }: { active: boolean; onCli
   return <button onClick={onClick} className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition ${style[tone]}`}>{label}</button>
 }
 
-function AttendanceView({ students, attendance, update, markAll, today }: {
+function AttendanceView({ students, attendance, today, update, markAll }: {
   students: StudentRow[]
-  attendance: Record<number, AttendanceStatus>
-  update: (id: number, status: AttendanceStatus) => void
-  markAll: (status: AttendanceStatus) => void
+  attendance: AttendanceRow[]
   today: string
+  update: (id: number, date: string, status: AttendanceStatus) => void
+  markAll: (date: string, status: AttendanceStatus) => void
 }) {
+  const [selectedDate, setSelectedDate] = useState(today)
+  const minDate = addDaysToDateStr(today, -31)
+
+  const dayMap = useMemo(() => {
+    const map: Record<number, AttendanceStatus> = {}
+    for (const row of attendance) if (row.date === selectedDate) map[row.student_id] = row.status
+    return map
+  }, [attendance, selectedDate])
+
+  const isToday = selectedDate === today
+
   return (
     <>
-      <SectionHeader eyebrow="Davomat nazorati" title="Yo‘qlama" description={`Bugun, ${formatUzDate(today, 'long')}`} />
+      <SectionHeader
+        eyebrow="Davomat nazorati"
+        title="Yo‘qlama"
+        description={isToday ? `Bugun, ${formatUzDate(selectedDate, 'long')}` : formatUzDate(selectedDate, 'long')}
+        action={
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={selectedDate}
+              min={minDate}
+              max={today}
+              onChange={e => setSelectedDate(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400"
+              style={{ colorScheme: 'light' }}
+            />
+            {!isToday && (
+              <button onClick={() => setSelectedDate(today)} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#1958d1]">
+                Bugunga qaytish
+              </button>
+            )}
+          </div>
+        }
+      />
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
         <div>
           <p className="text-sm font-semibold text-blue-900">Tezkor belgilash</p>
           <p className="mt-0.5 text-xs text-blue-700/70">Barcha o‘quvchilar holatini bir bosishda belgilang</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => markAll('present')} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-emerald-700 shadow-sm">Hammasi bor</button>
-          <button onClick={() => markAll('absent')} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-sm">Hammasi yo‘q</button>
+          <button onClick={() => markAll(selectedDate, 'present')} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-emerald-700 shadow-sm">Hammasi bor</button>
+          <button onClick={() => markAll(selectedDate, 'absent')} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-sm">Hammasi yo‘q</button>
         </div>
       </div>
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid grid-cols-[1fr_240px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+        <div className="hidden grid-cols-[1fr_240px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:grid">
           <span>O‘quvchi</span><span className="text-center">Holati</span>
         </div>
         {students.map(student => (
-          <div key={student.id} className="grid grid-cols-[1fr_240px] items-center border-b border-slate-100 px-5 py-3.5 last:border-0">
+          <div key={student.id} className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3.5 last:border-0 sm:grid sm:grid-cols-[1fr_240px] sm:items-center sm:gap-0">
             <div className="flex items-center gap-3">
-              <div className={`flex size-9 items-center justify-center rounded-full text-xs font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
+              <div className={`flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
               <div><p className="text-sm font-semibold">{fullName(student)}</p><p className="text-[11px] text-slate-400">ID: {String(student.id).padStart(3, '0')}</p></div>
             </div>
-            <div className="flex justify-center gap-1.5">
-              <StatusButton active={attendance[student.id] === 'present'} onClick={() => update(student.id, 'present')} tone="present" label="Bor" />
-              <StatusButton active={attendance[student.id] === 'absent'} onClick={() => update(student.id, 'absent')} tone="absent" label="Yo‘q" />
-              <StatusButton active={attendance[student.id] === 'excused'} onClick={() => update(student.id, 'excused')} tone="excused" label="Sababli" />
+            <div className="flex justify-start gap-1.5 sm:justify-center">
+              <StatusButton active={dayMap[student.id] === 'present'} onClick={() => update(student.id, selectedDate, 'present')} tone="present" label="Bor" />
+              <StatusButton active={dayMap[student.id] === 'absent'} onClick={() => update(student.id, selectedDate, 'absent')} tone="absent" label="Yo‘q" />
+              <StatusButton active={dayMap[student.id] === 'excused'} onClick={() => update(student.id, selectedDate, 'excused')} tone="excused" label="Sababli" />
             </div>
           </div>
         ))}
@@ -627,55 +725,72 @@ function StudentsView({ students, search, setSearch, onAdd, onRemove }: {
   )
 }
 
-function DutiesView({ students, duties, today, onAdd, onRemove }: {
+function DutiesView({ students, duties, onToggle }: {
   students: StudentRow[]
   duties: DutyRow[]
-  today: string
-  onAdd: (studentId: number, date: string) => void
-  onRemove: (id: number) => void
+  onToggle: (dayOfWeek: number, studentId: number, onDuty: boolean) => void
 }) {
-  const [studentId, setStudentId] = useState<number | ''>('')
-  const [date, setDate] = useState(today)
+  const dutySet = useMemo(() => {
+    const set = new Set<string>()
+    for (const d of duties) set.add(`${d.day_of_week}-${d.student_id}`)
+    return set
+  }, [duties])
 
   return (
     <>
-      <SectionHeader eyebrow="Tartib va mas’uliyat" title="Navbatchilar" description="Oylik navbatchilik jadvalini boshqaring" />
-      <form
-        onSubmit={e => { e.preventDefault(); if (!studentId) return; onAdd(Number(studentId), date) }}
-        className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4"
-      >
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-slate-500">O‘quvchi</label>
-          <select value={studentId} onChange={e => setStudentId(e.target.value as any)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }}>
-            <option value="">Tanlang</option>
-            {students.map(s => <option key={s.id} value={s.id}>{fullName(s)}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-slate-500">Sana</label>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400" style={{ colorScheme: 'light' }} />
-        </div>
-        <Button type="submit" className="h-10 rounded-xl bg-[#1958d1] hover:bg-blue-700"><Plus className="mr-2 size-4" />Qo‘shish</Button>
-      </form>
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid grid-cols-[150px_1fr_60px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-          <span>Sana</span><span>Navbatchi</span><span />
-        </div>
-        {duties.map(duty => {
-          const s = oneOrNull(duty.students)
-          return (
-            <div key={duty.id} className="grid grid-cols-[150px_1fr_60px] items-center border-b border-slate-100 px-5 py-4 last:border-0">
-              <span className="text-sm font-semibold">{formatUzDate(duty.date)}</span>
-              <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 w-fit">{s ? fullName(s) : '—'}</span>
-              <button onClick={() => { if (confirm('Bu navbatchilikni o‘chirishni tasdiqlaysizmi?')) onRemove(duty.id) }} className="justify-self-end rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="size-4" /></button>
-            </div>
-          )
-        })}
-        {duties.length === 0 && <p className="px-5 py-8 text-center text-sm text-slate-400">Navbatchi belgilanmagan</p>}
+      <SectionHeader
+        eyebrow="Tartib va mas’uliyat"
+        title="Navbatchilar"
+        description="Haftalik jadval — har hafta avtomatik takrorlanadi (yakshanba kuni navbatchilik yo‘q)"
+      />
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[560px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <th className="sticky left-0 z-10 bg-slate-50/70 px-5 py-3 text-left">O‘quvchi</th>
+              {WEEKDAYS.map(w => (
+                <th key={w.dow} className="px-2 py-3 text-center">{w.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {students.map(student => (
+              <tr key={student.id} className="border-b border-slate-100 last:border-0">
+                <td className="sticky left-0 z-10 bg-white px-5 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`flex size-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
+                    <span className="whitespace-nowrap text-sm font-semibold">{fullName(student)}</span>
+                  </div>
+                </td>
+                {WEEKDAYS.map(w => {
+                  const onDuty = dutySet.has(`${w.dow}-${student.id}`)
+                  return (
+                    <td key={w.dow} className="px-2 py-3 text-center">
+                      <button
+                        onClick={() => onToggle(w.dow, student.id, !onDuty)}
+                        aria-pressed={onDuty}
+                        aria-label={`${fullName(student)} — ${w.label}`}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${onDuty ? 'bg-[#1958d1]' : 'bg-slate-200'}`}
+                      >
+                        <span className={`inline-block size-4 transform rounded-full bg-white shadow transition ${onDuty ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+            {students.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-5 py-8 text-center text-sm text-slate-400">Hali o‘quvchi qo‘shilmagan</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </>
   )
 }
+
 
 function MonitorView({ klasskomList, onCreate, onResetPassword }: {
   klasskomList: KlasskomRow[]
@@ -791,10 +906,10 @@ function PaymentsView({ students, collections, payments, stats, onCreate, onDele
             <div key={collection.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <button
                 onClick={() => setOpenCollectionId(isOpen ? null : collection.id)}
-                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left"
+                className="flex w-full flex-wrap items-center justify-between gap-3 px-5 py-4 text-left"
               >
-                <div>
-                  <p className="text-sm font-bold">{collection.title}</p>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold">{collection.title}</p>
                   <p className="mt-1 text-xs text-slate-400">
                     {formatMoney(collection.expected_amount)} / o‘quvchi • {collectionPayments.length} nafar • {formatUzDate(collection.created_at.slice(0, 10))}
                   </p>
@@ -815,7 +930,7 @@ function PaymentsView({ students, collections, payments, stats, onCreate, onDele
 
               {isOpen && (
                 <div className="border-t border-slate-100">
-                  <div className="grid grid-cols-[1fr_140px_140px_140px] border-b border-slate-100 bg-slate-50/70 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <div className="hidden grid-cols-[1fr_140px_140px_140px] border-b border-slate-100 bg-slate-50/70 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:grid">
                     <span>O‘quvchi</span><span>To‘langan</span><span>Qolgan</span><span>Holat</span>
                   </div>
                   {collectionPayments.map(payment => {
@@ -931,14 +1046,16 @@ function PaymentStudentRow({ student, payment, expectedAmount, onChange }: {
   const status = remaining === 0 && expectedAmount > 0 ? 'To‘langan' : payment.paid_amount ? 'Qisman' : 'To‘lanmagan'
 
   return (
-    <div className="grid grid-cols-[1fr_140px_140px_140px] items-center gap-2 border-b border-slate-100 px-5 py-3 last:border-0">
+    <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3 last:border-0 sm:grid sm:grid-cols-[1fr_140px_140px_140px] sm:items-center">
       <div className="flex items-center gap-3">
-        <div className={`flex size-7 items-center justify-center rounded-full text-[10px] font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
+        <div className={`flex size-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
         <span className="text-sm font-semibold">{fullName(student)}</span>
       </div>
-      <span className="text-xs font-semibold">{formatMoney(payment.paid_amount)}</span>
-      <span className="text-xs text-slate-500">{formatMoney(remaining)}</span>
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-3 text-xs sm:contents">
+        <span className="font-semibold sm:font-semibold">{formatMoney(payment.paid_amount)} to‘langan</span>
+        <span className="text-slate-500">{formatMoney(remaining)} qoldi</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
         <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${status === 'To‘langan' ? 'bg-emerald-50 text-emerald-700' : status === 'Qisman' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'}`}>{status}</span>
         <input
           type="number"
@@ -959,7 +1076,19 @@ function PaymentStudentRow({ student, payment, expectedAmount, onChange }: {
   )
 }
 
-function SettingsView({ role, className }: { role: Role; className: string }) {
+function SettingsView({ role, className, profileName, onRenameClass, onChangePassword }: {
+  role: Role
+  className: string
+  profileName: string
+  onRenameClass: (name: string) => Promise<{ error?: string; success?: boolean } | undefined>
+  onChangePassword: (password: string) => Promise<{ error?: string; success?: boolean } | undefined>
+}) {
+  const [classNameInput, setClassNameInput] = useState(className)
+  const [password, setPassword] = useState('')
+  const [classError, setClassError] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordSaved, setPasswordSaved] = useState(false)
+
   return (
     <>
       <SectionHeader eyebrow="Tizim sozlamalari" title="Sozlamalar" description="Sinf va hisob sozlamalarini boshqaring" />
@@ -967,12 +1096,61 @@ function SettingsView({ role, className }: { role: Role; className: string }) {
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-5 flex size-10 items-center justify-center rounded-xl bg-blue-50 text-[#1958d1]"><Settings className="size-5" /></div>
           <h3 className="font-bold">Sinf ma’lumotlari</h3>
-          <p className="mt-1 text-sm text-slate-400">{className}</p>
+          {role === 'teacher' ? (
+            <form
+              onSubmit={async e => {
+                e.preventDefault()
+                setClassError('')
+                const r = await onRenameClass(classNameInput)
+                if (r?.error) setClassError(r.error)
+              }}
+              className="mt-4 flex flex-wrap items-center gap-2"
+            >
+              <input
+                value={classNameInput}
+                onChange={e => setClassNameInput(e.target.value)}
+                className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400"
+                style={{ colorScheme: 'light' }}
+              />
+              <Button type="submit" className="h-10 rounded-xl bg-[#1958d1] hover:bg-blue-700">Saqlash</Button>
+              {classError && <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{classError}</p>}
+            </form>
+          ) : (
+            <p className="mt-1 text-sm text-slate-400">{className}</p>
+          )}
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-5 flex size-10 items-center justify-center rounded-xl bg-violet-50 text-violet-700"><UserRound className="size-5" /></div>
           <h3 className="font-bold">Profil</h3>
-          <p className="mt-1 text-sm text-slate-400">{role === 'teacher' ? 'Sinf rahbari hisobi' : 'Klasskom shaxsiy hisobi'}</p>
+          <p className="mt-1 text-sm text-slate-400">{profileName} • {role === 'teacher' ? 'Sinf rahbari hisobi' : 'Klasskom shaxsiy hisobi'}</p>
+
+          <form
+            onSubmit={async e => {
+              e.preventDefault()
+              setPasswordError('')
+              setPasswordSaved(false)
+              const r = await onChangePassword(password)
+              if (r?.error) setPasswordError(r.error)
+              else { setPasswordSaved(true); setPassword('') }
+            }}
+            className="mt-5 border-t border-slate-100 pt-5"
+          >
+            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-500"><KeyRound className="size-3.5" />Yangi parol o‘rnatish</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                minLength={6}
+                placeholder="Kamida 6 belgi"
+                className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400"
+                style={{ colorScheme: 'light' }}
+              />
+              <Button type="submit" variant="outline" className="h-10 rounded-xl">O‘zgartirish</Button>
+            </div>
+            {passwordError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{passwordError}</p>}
+            {passwordSaved && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">Parol yangilandi</p>}
+          </form>
         </div>
       </div>
     </>
