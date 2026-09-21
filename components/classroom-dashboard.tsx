@@ -1146,7 +1146,7 @@ function SettingsView({ role, className, profileName, onRenameClass, onChangePas
                 className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400"
                 style={{ colorScheme: 'light' }}
               />
-              <Button type="submit" variant="outline" className="h-10 rounded-xl">O‘zgartirish</Button>
+              <Button type="submit" className="h-10 rounded-xl bg-[#1958d1] text-white hover:bg-blue-700">O‘zgartirish</Button>
             </div>
             {passwordError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{passwordError}</p>}
             {passwordSaved && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">Parol yangilandi</p>}
