@@ -107,11 +107,6 @@ function formatUzDate(dateStr: string, style: 'long' | 'short' = 'short') {
 function dowOf(dateStr: string) {
   return new Date(`${dateStr}T00:00:00`).getDay() // 0=Sunday, 1=Monday, ... 6=Saturday
 }
-function addDaysToDateStr(dateStr: string, delta: number) {
-  const d = new Date(`${dateStr}T00:00:00`)
-  d.setDate(d.getDate() + delta)
-  return d.toISOString().slice(0, 10)
-}
 const navItems: { id: Tab; label: string; icon: typeof LayoutDashboard; roles: Role[] }[] = [
   { id: 'home', label: 'Bosh sahifa', icon: LayoutDashboard, roles: ['teacher', 'klasskom'] },
   { id: 'attendance', label: 'Yo‘qlama', icon: ClipboardCheck, roles: ['teacher', 'klasskom'] },
@@ -604,50 +599,23 @@ function AttendanceView({ students, attendance, today, update, markAll }: {
   update: (id: number, date: string, status: AttendanceStatus) => void
   markAll: (date: string, status: AttendanceStatus) => void
 }) {
-  const [selectedDate, setSelectedDate] = useState(today)
-  const minDate = addDaysToDateStr(today, -31)
-
   const dayMap = useMemo(() => {
     const map: Record<number, AttendanceStatus> = {}
-    for (const row of attendance) if (row.date === selectedDate) map[row.student_id] = row.status
+    for (const row of attendance) if (row.date === today) map[row.student_id] = row.status
     return map
-  }, [attendance, selectedDate])
-
-  const isToday = selectedDate === today
+  }, [attendance, today])
 
   return (
     <>
-      <SectionHeader
-        eyebrow="Davomat nazorati"
-        title="Yo‘qlama"
-        description={isToday ? `Bugun, ${formatUzDate(selectedDate, 'long')}` : formatUzDate(selectedDate, 'long')}
-        action={
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={selectedDate}
-              min={minDate}
-              max={today}
-              onChange={e => setSelectedDate(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-400"
-              style={{ colorScheme: 'light' }}
-            />
-            {!isToday && (
-              <button onClick={() => setSelectedDate(today)} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#1958d1]">
-                Bugunga qaytish
-              </button>
-            )}
-          </div>
-        }
-      />
+      <SectionHeader eyebrow="Davomat nazorati" title="Yo‘qlama" description={`Bugun, ${formatUzDate(today, 'long')}`} />
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
         <div>
           <p className="text-sm font-semibold text-blue-900">Tezkor belgilash</p>
           <p className="mt-0.5 text-xs text-blue-700/70">Barcha o‘quvchilar holatini bir bosishda belgilang</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => markAll(selectedDate, 'present')} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-emerald-700 shadow-sm">Hammasi bor</button>
-          <button onClick={() => markAll(selectedDate, 'absent')} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-sm">Hammasi yo‘q</button>
+          <button onClick={() => markAll(today, 'present')} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-emerald-700 shadow-sm">Hammasi bor</button>
+          <button onClick={() => markAll(today, 'absent')} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-sm">Hammasi yo‘q</button>
         </div>
       </div>
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -658,12 +626,12 @@ function AttendanceView({ students, attendance, today, update, markAll }: {
           <div key={student.id} className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3.5 last:border-0 sm:grid sm:grid-cols-[1fr_240px] sm:items-center sm:gap-0">
             <div className="flex items-center gap-3">
               <div className={`flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
-              <div><p className="text-sm font-semibold">{fullName(student)}</p><p className="text-[11px] text-slate-400">ID: {String(student.id).padStart(3, '0')}</p></div>
+              <p className="text-sm font-semibold">{fullName(student)}</p>
             </div>
             <div className="flex justify-start gap-1.5 sm:justify-center">
-              <StatusButton active={dayMap[student.id] === 'present'} onClick={() => update(student.id, selectedDate, 'present')} tone="present" label="Bor" />
-              <StatusButton active={dayMap[student.id] === 'absent'} onClick={() => update(student.id, selectedDate, 'absent')} tone="absent" label="Yo‘q" />
-              <StatusButton active={dayMap[student.id] === 'excused'} onClick={() => update(student.id, selectedDate, 'excused')} tone="excused" label="Sababli" />
+              <StatusButton active={dayMap[student.id] === 'present'} onClick={() => update(student.id, today, 'present')} tone="present" label="Bor" />
+              <StatusButton active={dayMap[student.id] === 'absent'} onClick={() => update(student.id, today, 'absent')} tone="absent" label="Yo‘q" />
+              <StatusButton active={dayMap[student.id] === 'excused'} onClick={() => update(student.id, today, 'excused')} tone="excused" label="Sababli" />
             </div>
           </div>
         ))}
@@ -672,6 +640,7 @@ function AttendanceView({ students, attendance, today, update, markAll }: {
     </>
   )
 }
+
 
 function StudentsView({ students, search, setSearch, onAdd, onRemove }: {
   students: StudentRow[]
