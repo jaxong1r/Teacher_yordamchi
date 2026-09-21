@@ -704,7 +704,7 @@ function StudentsView({ students, search, setSearch, onAdd, onRemove }: {
       )}
       <div className="mb-5 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 sm:w-[360px]">
         <Search className="size-4 text-slate-400" />
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="O‘quvchini qidirish..." className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="O‘quvchini qidirish..." className="w-full bg-transparent text-sm text-slate-950 outline-none placeholder:text-slate-400" style={{ colorScheme: 'light' }} />
       </div>
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="grid grid-cols-[70px_1fr_80px] border-b border-slate-100 bg-slate-50/70 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
