@@ -55,12 +55,12 @@ type Profile = {
 }
 
 const WEEKDAYS = [
-  { dow: 1, label: 'Dush' },
-  { dow: 2, label: 'Sesh' },
-  { dow: 3, label: 'Chor' },
-  { dow: 4, label: 'Pay' },
-  { dow: 5, label: 'Jum' },
-  { dow: 6, label: 'Shan' },
+  { dow: 1, label: 'Dush', full: 'Dushanba' },
+  { dow: 2, label: 'Sesh', full: 'Seshanba' },
+  { dow: 3, label: 'Chor', full: 'Chorshanba' },
+  { dow: 4, label: 'Pay', full: 'Payshanba' },
+  { dow: 5, label: 'Jum', full: 'Juma' },
+  { dow: 6, label: 'Shan', full: 'Shanba' },
 ]
 
 const ACCENTS = [
@@ -736,6 +736,8 @@ function DutiesView({ students, duties, onToggle }: {
   duties: DutyRow[]
   onToggle: (dayOfWeek: number, studentId: number, onDuty: boolean) => void
 }) {
+  const [openDay, setOpenDay] = useState<number | null>(null)
+
   const dutySet = useMemo(() => {
     const set = new Set<string>()
     for (const d of duties) set.add(`${d.day_of_week}-${d.student_id}`)
@@ -747,51 +749,53 @@ function DutiesView({ students, duties, onToggle }: {
       <SectionHeader
         eyebrow="Tartib va mas’uliyat"
         title="Navbatchilar"
-        description="Haftalik jadval — har hafta avtomatik takrorlanadi (yakshanba kuni navbatchilik yo‘q)"
+        description="Har hafta avtomatik takrorlanadi (yakshanba kuni navbatchilik yo‘q)"
       />
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[560px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              <th className="sticky left-0 z-10 bg-slate-50/70 px-5 py-3 text-left">O‘quvchi</th>
-              {WEEKDAYS.map(w => (
-                <th key={w.dow} className="px-2 py-3 text-center">{w.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {students.map(student => (
-              <tr key={student.id} className="border-b border-slate-100 last:border-0">
-                <td className="sticky left-0 z-10 bg-white px-5 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`flex size-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${accentOf(student.id)}`}>{initialsOf(student)}</div>
-                    <span className="whitespace-nowrap text-sm font-semibold">{fullName(student)}</span>
-                  </div>
-                </td>
-                {WEEKDAYS.map(w => {
-                  const onDuty = dutySet.has(`${w.dow}-${student.id}`)
-                  return (
-                    <td key={w.dow} className="px-2 py-3 text-center">
-                      <button
-                        onClick={() => onToggle(w.dow, student.id, !onDuty)}
-                        aria-pressed={onDuty}
-                        aria-label={`${fullName(student)} — ${w.label}`}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${onDuty ? 'bg-[#1958d1]' : 'bg-slate-200'}`}
-                      >
-                        <span className={`inline-block size-4 transform rounded-full bg-white shadow transition ${onDuty ? 'translate-x-6' : 'translate-x-1'}`} />
-                      </button>
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-            {students.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-5 py-8 text-center text-sm text-slate-400">Hali o‘quvchi qo‘shilmagan</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="space-y-3">
+        {WEEKDAYS.map(w => {
+          const dayStudents = students.filter(s => dutySet.has(`${w.dow}-${s.id}`))
+          const isOpen = openDay === w.dow
+          return (
+            <div key={w.dow} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between gap-3 px-5 py-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold">{w.full}</p>
+                  <p className="mt-1 truncate text-xs text-slate-400">
+                    {dayStudents.length > 0 ? dayStudents.map(fullName).join(', ') : 'Navbatchi belgilanmagan'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setOpenDay(isOpen ? null : w.dow)}
+                  aria-label={`${w.full} uchun navbatchi belgilash`}
+                  className={`flex size-9 shrink-0 items-center justify-center rounded-full transition ${isOpen ? 'bg-[#1958d1] text-white' : 'bg-blue-50 text-[#1958d1] hover:bg-blue-100'}`}
+                >
+                  <Plus className={`size-4 transition ${isOpen ? 'rotate-45' : ''}`} />
+                </button>
+              </div>
+
+              {isOpen && (
+                <div className="grid gap-1 border-t border-slate-100 p-4 sm:grid-cols-2">
+                  {students.map(s => {
+                    const checked = dutySet.has(`${w.dow}-${s.id}`)
+                    return (
+                      <label key={s.id} className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => onToggle(w.dow, s.id, !checked)}
+                          className="size-4 shrink-0 accent-[#1958d1]"
+                        />
+                        <span className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${accentOf(s.id)}`}>{initialsOf(s)}</span>
+                        {fullName(s)}
+                      </label>
+                    )
+                  })}
+                  {students.length === 0 && <p className="px-2 text-sm text-slate-400">Hali o‘quvchi qo‘shilmagan</p>}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </>
   )
